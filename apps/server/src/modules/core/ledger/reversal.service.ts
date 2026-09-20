@@ -1,8 +1,13 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { AssetCode } from '@meter/contracts';
 import type { Kysely, Transaction } from 'kysely';
 import { DATABASE } from '../../../platform/database/database.module.ts';
-import { serializable } from '../../../platform/database/transaction.ts';
+import {
+  DEFAULT_RETRY_POLICY,
+  RETRY_POLICY,
+  type RetryPolicy,
+  serializable,
+} from '../../../platform/database/transaction.ts';
 import type { DB } from '../../../platform/database/types.ts';
 import { executeIdempotent } from './idempotency.ts';
 import { LedgerError } from './ledger.errors.ts';
@@ -18,7 +23,10 @@ const NON_REVERSIBLE = new Set(['reserve', 'capture', 'release', 'refund', 'reve
 
 @Injectable()
 export class ReversalService {
-  constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Kysely<DB>,
+    @Optional() @Inject(RETRY_POLICY) private readonly retry: RetryPolicy = DEFAULT_RETRY_POLICY,
+  ) {}
 
   /** Corrections never edit history: they add an exact opposite journal (§10.2). */
   async reverse(command: ReverseCommand): Promise<LedgerCommandResult> {
@@ -34,7 +42,7 @@ export class ReversalService {
         () => this.postReversal(trx, command),
       );
       return { ...result, replayed };
-    });
+    }, this.retry);
   }
 
   private async postReversal(

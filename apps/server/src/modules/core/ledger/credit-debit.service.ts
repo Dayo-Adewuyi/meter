@@ -1,7 +1,12 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { Kysely, Transaction } from 'kysely';
 import { DATABASE } from '../../../platform/database/database.module.ts';
-import { serializable } from '../../../platform/database/transaction.ts';
+import {
+  DEFAULT_RETRY_POLICY,
+  RETRY_POLICY,
+  type RetryPolicy,
+  serializable,
+} from '../../../platform/database/transaction.ts';
 import type { DB } from '../../../platform/database/types.ts';
 import { executeIdempotent } from './idempotency.ts';
 import { LedgerError } from './ledger.errors.ts';
@@ -12,7 +17,10 @@ type Direction = 'credit' | 'debit';
 
 @Injectable()
 export class CreditDebitService {
-  constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Kysely<DB>,
+    @Optional() @Inject(RETRY_POLICY) private readonly retry: RetryPolicy = DEFAULT_RETRY_POLICY,
+  ) {}
 
   /** Money entering Meter: debit external cash, credit the customer. */
   credit(command: LedgerAmountCommand): Promise<LedgerCommandResult> {
@@ -48,7 +56,7 @@ export class CreditDebitService {
         () => this.post(trx, kind, command),
       );
       return { ...result, replayed };
-    });
+    }, this.retry);
   }
 
   private async post(

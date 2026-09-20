@@ -1,14 +1,22 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type Kysely, sql } from 'kysely';
 import { DATABASE } from '../../../platform/database/database.module.ts';
-import { serializable } from '../../../platform/database/transaction.ts';
+import {
+  DEFAULT_RETRY_POLICY,
+  RETRY_POLICY,
+  type RetryPolicy,
+  serializable,
+} from '../../../platform/database/transaction.ts';
 import type { DB } from '../../../platform/database/types.ts';
 import { LedgerError } from './ledger.errors.ts';
 import { acquireLedgerLock } from './post-journal.ts';
 
 @Injectable()
 export class RebuildProjectionsService {
-  constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Kysely<DB>,
+    @Optional() @Inject(RETRY_POLICY) private readonly retry: RetryPolicy = DEFAULT_RETRY_POLICY,
+  ) {}
 
   /**
    * Maintenance only: recomputes `ledger.balances` from the immutable entries
@@ -55,6 +63,6 @@ export class RebuildProjectionsService {
       }
 
       return { accountCount: rebuilt.rows.length };
-    });
+    }, this.retry);
   }
 }

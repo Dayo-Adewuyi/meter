@@ -1,8 +1,13 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { AssetCode } from '@meter/contracts';
 import { type Kysely, type Transaction, sql } from 'kysely';
 import { DATABASE } from '../../../platform/database/database.module.ts';
-import { serializable } from '../../../platform/database/transaction.ts';
+import {
+  DEFAULT_RETRY_POLICY,
+  RETRY_POLICY,
+  type RetryPolicy,
+  serializable,
+} from '../../../platform/database/transaction.ts';
 import type { DB } from '../../../platform/database/types.ts';
 import { executeIdempotent } from './idempotency.ts';
 import { LedgerError } from './ledger.errors.ts';
@@ -11,7 +16,10 @@ import { acquireLedgerLock, lockAccounts, postJournal } from './post-journal.ts'
 
 @Injectable()
 export class RefundService {
-  constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Kysely<DB>,
+    @Optional() @Inject(RETRY_POLICY) private readonly retry: RetryPolicy = DEFAULT_RETRY_POLICY,
+  ) {}
 
   /**
    * Returns captured value to the customer it came from, never more than that
@@ -38,7 +46,7 @@ export class RefundService {
         () => this.postRefund(trx, command),
       );
       return { ...result, replayed };
-    });
+    }, this.retry);
   }
 
   private async postRefund(

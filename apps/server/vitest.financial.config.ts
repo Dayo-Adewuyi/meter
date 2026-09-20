@@ -9,7 +9,11 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
-    include: ['src/**/*.integration.test.ts', 'src/**/*.property.test.ts'],
+    include: [
+      'src/**/*.integration.test.ts',
+      'src/**/*.property.test.ts',
+      'src/**/*.concurrency.test.ts',
+    ],
     fileParallelism: false,
     pool: 'forks',
     poolOptions: { forks: { singleFork: true } },

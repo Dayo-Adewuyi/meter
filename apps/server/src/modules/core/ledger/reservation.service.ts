@@ -1,8 +1,13 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { AssetCode } from '@meter/contracts';
 import type { Kysely, Transaction } from 'kysely';
 import { DATABASE } from '../../../platform/database/database.module.ts';
-import { serializable } from '../../../platform/database/transaction.ts';
+import {
+  DEFAULT_RETRY_POLICY,
+  RETRY_POLICY,
+  type RetryPolicy,
+  serializable,
+} from '../../../platform/database/transaction.ts';
 import type { DB } from '../../../platform/database/types.ts';
 import { postedAmount } from './credit-debit.service.ts';
 import { executeIdempotent } from './idempotency.ts';
@@ -89,7 +94,10 @@ async function lockReservation(
 
 @Injectable()
 export class ReservationService {
-  constructor(@Inject(DATABASE) private readonly db: Kysely<DB>) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Kysely<DB>,
+    @Optional() @Inject(RETRY_POLICY) private readonly retry: RetryPolicy = DEFAULT_RETRY_POLICY,
+  ) {}
 
   /** Holds value without spending it: debit available, credit reserved. */
   async reserve(command: ReserveCommand): Promise<ReservationResult> {
@@ -115,7 +123,7 @@ export class ReservationService {
         () => this.postReserve(trx, command),
       );
       return { ...result, replayed };
-    });
+    }, this.retry);
   }
 
   private async postReserve(
@@ -218,7 +226,7 @@ export class ReservationService {
         () => this.postCapture(trx, command),
       );
       return { ...result, replayed };
-    });
+    }, this.retry);
   }
 
   private async postCapture(
@@ -328,7 +336,7 @@ export class ReservationService {
         () => this.postRelease(trx, command),
       );
       return { ...result, replayed };
-    });
+    }, this.retry);
   }
 
   private async postRelease(
