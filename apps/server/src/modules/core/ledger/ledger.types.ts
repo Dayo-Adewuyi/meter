@@ -118,3 +118,25 @@ export interface CaptureResult {
   readonly state: ReservationState;
   readonly replayed: boolean;
 }
+
+/**
+ * Release takes no amount on purpose: it always returns everything still held,
+ * so no reservation can strand a residue that nobody can reach.
+ */
+export interface ReleaseCommand {
+  readonly idempotencyScope: string;
+  readonly idempotencyKey: string;
+  readonly correlationId: string;
+  readonly reservationId: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface ReleaseResult {
+  readonly transactionId: string;
+  readonly correlationId: string;
+  readonly reservationId: string;
+  readonly assetCode: AssetCode;
+  readonly releasedAmountAtomic: string;
+  readonly state: ReservationState;
+  readonly replayed: boolean;
+}

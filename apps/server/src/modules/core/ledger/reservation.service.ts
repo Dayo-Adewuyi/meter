@@ -12,6 +12,8 @@ import type {
   CaptureResult,
   LockedAccount,
   ReservationResult,
+  ReleaseCommand,
+  ReleaseResult,
   ReservationState,
   ReserveCommand,
 } from './ledger.types.ts';
@@ -309,6 +311,80 @@ export class ReservationService {
       remainingAmountAtomic: stillRemaining.toString(),
       capped: captured < command.amountAtomic,
       state,
+    };
+  }
+
+  /** Returns all unused value to the customer and closes the authorization. */
+  async release(command: ReleaseCommand): Promise<ReleaseResult> {
+    return serializable(this.db, async (trx) => {
+      await acquireLedgerLock(trx);
+      const { result, replayed } = await executeIdempotent(
+        trx,
+        {
+          scope: command.idempotencyScope,
+          key: command.idempotencyKey,
+          request: { kind: 'release', reservationId: command.reservationId },
+        },
+        () => this.postRelease(trx, command),
+      );
+      return { ...result, replayed };
+    });
+  }
+
+  private async postRelease(
+    trx: Transaction<DB>,
+    command: ReleaseCommand,
+  ): Promise<Omit<ReleaseResult, 'replayed'>> {
+    const reservation = await lockReservation(trx, command.reservationId);
+    const remaining = remainingOf(reservation);
+    if (remaining <= 0n) throw new LedgerError('RESERVATION_EXHAUSTED', command.reservationId);
+
+    const assetCode = reservation.asset_code as AssetCode;
+    const posted = await postJournal(trx, {
+      transactionType: 'release',
+      correlationId: command.correlationId,
+      entries: [
+        {
+          accountId: reservation.reserved_account_id,
+          assetCode,
+          direction: 'debit',
+          amountAtomic: remaining,
+        },
+        {
+          accountId: reservation.available_account_id,
+          assetCode,
+          direction: 'credit',
+          amountAtomic: remaining,
+        },
+      ],
+      ...(command.metadata === undefined ? {} : { metadata: command.metadata }),
+      event: {
+        type: 'ledger.released',
+        payload: {
+          reservationId: command.reservationId,
+          assetCode,
+          amountAtomic: remaining.toString(),
+        },
+      },
+    });
+
+    await trx
+      .updateTable('ledger.reservations')
+      .set({
+        released_amount: (BigInt(reservation.released_amount) + remaining).toString(),
+        state: 'released',
+        updated_at: new Date(),
+      })
+      .where('id', '=', command.reservationId)
+      .execute();
+
+    return {
+      transactionId: posted.transactionId,
+      correlationId: posted.correlationId,
+      reservationId: command.reservationId,
+      assetCode,
+      releasedAmountAtomic: remaining.toString(),
+      state: 'released',
     };
   }
 }
