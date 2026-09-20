@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import type { AssetCode } from '@meter/contracts';
 import type { Kysely, Transaction } from 'kysely';
 import { DATABASE } from '../../../platform/database/database.module.ts';
 import { serializable } from '../../../platform/database/transaction.ts';
@@ -7,8 +8,11 @@ import { postedAmount } from './credit-debit.service.ts';
 import { executeIdempotent } from './idempotency.ts';
 import { LedgerError } from './ledger.errors.ts';
 import type {
+  CaptureCommand,
+  CaptureResult,
   LockedAccount,
   ReservationResult,
+  ReservationState,
   ReserveCommand,
 } from './ledger.types.ts';
 import { acquireLedgerLock, lockAccounts, postJournal } from './post-journal.ts';
@@ -38,6 +42,47 @@ function assertReservationPair(
   if (available.asset_code !== assetCode || reserved.asset_code !== assetCode) {
     throw new LedgerError('ASSET_MISMATCH', assetCode);
   }
+}
+
+interface LockedReservation {
+  readonly id: string;
+  readonly reserved_account_id: string;
+  readonly available_account_id: string;
+  readonly asset_code: string;
+  readonly original_amount: string;
+  readonly captured_amount: string;
+  readonly released_amount: string;
+}
+
+/** Value still held by the authorization: neither captured nor released. */
+function remainingOf(reservation: LockedReservation): bigint {
+  return (
+    BigInt(reservation.original_amount) -
+    BigInt(reservation.captured_amount) -
+    BigInt(reservation.released_amount)
+  );
+}
+
+async function lockReservation(
+  trx: Transaction<DB>,
+  reservationId: string,
+): Promise<LockedReservation> {
+  const reservation = await trx
+    .selectFrom('ledger.reservations')
+    .select([
+      'id',
+      'reserved_account_id',
+      'available_account_id',
+      'asset_code',
+      'original_amount',
+      'captured_amount',
+      'released_amount',
+    ])
+    .where('id', '=', reservationId)
+    .forUpdate()
+    .executeTakeFirst();
+  if (reservation === undefined) throw new LedgerError('RESERVATION_NOT_FOUND', reservationId);
+  return reservation;
 }
 
 @Injectable()
@@ -141,6 +186,129 @@ export class ReservationService {
       releasedAmountAtomic: '0',
       remainingAmountAtomic: command.amountAtomic.toString(),
       state: 'open',
+    };
+  }
+
+  /**
+   * Settles part or all of an authorization. Capturing more than remains is a
+   * normal outcome, not an error: the excess is silently dropped and reported
+   * through `capped`, so a caller never moves value it never held.
+   */
+  async capture(command: CaptureCommand): Promise<CaptureResult> {
+    if (command.amountAtomic <= 0n) {
+      throw new LedgerError('INVALID_ENTRY_AMOUNT', 'amount must be positive');
+    }
+
+    return serializable(this.db, async (trx) => {
+      await acquireLedgerLock(trx);
+      const { result, replayed } = await executeIdempotent(
+        trx,
+        {
+          scope: command.idempotencyScope,
+          key: command.idempotencyKey,
+          request: {
+            kind: 'capture',
+            reservationId: command.reservationId,
+            destinationAccountId: command.destinationAccountId,
+            amountAtomic: command.amountAtomic,
+          },
+        },
+        () => this.postCapture(trx, command),
+      );
+      return { ...result, replayed };
+    });
+  }
+
+  private async postCapture(
+    trx: Transaction<DB>,
+    command: CaptureCommand,
+  ): Promise<Omit<CaptureResult, 'replayed'>> {
+    const reservation = await lockReservation(trx, command.reservationId);
+    const remaining = remainingOf(reservation);
+    if (remaining <= 0n) throw new LedgerError('RESERVATION_EXHAUSTED', command.reservationId);
+
+    const captured = command.amountAtomic < remaining ? command.amountAtomic : remaining;
+    const accounts = await lockAccounts(trx, [
+      reservation.reserved_account_id,
+      command.destinationAccountId,
+    ]);
+    const destination = find(accounts, command.destinationAccountId);
+    if (
+      destination.normal_balance !== 'credit' ||
+      destination.purpose === 'customer_available' ||
+      destination.purpose === 'customer_reserved'
+    ) {
+      throw new LedgerError('INVALID_ACCOUNT_ROLE', 'capture destination cannot hold customer value');
+    }
+    if (destination.status !== 'active') {
+      throw new LedgerError('ACCOUNT_INACTIVE', command.destinationAccountId);
+    }
+    if (destination.asset_code !== reservation.asset_code) {
+      throw new LedgerError('ASSET_MISMATCH', reservation.asset_code);
+    }
+
+    const assetCode = reservation.asset_code as AssetCode;
+    const posted = await postJournal(trx, {
+      transactionType: 'capture',
+      correlationId: command.correlationId,
+      entries: [
+        {
+          accountId: reservation.reserved_account_id,
+          assetCode,
+          direction: 'debit',
+          amountAtomic: captured,
+        },
+        {
+          accountId: command.destinationAccountId,
+          assetCode,
+          direction: 'credit',
+          amountAtomic: captured,
+        },
+      ],
+      ...(command.metadata === undefined ? {} : { metadata: command.metadata }),
+      event: {
+        type: 'ledger.captured',
+        payload: {
+          reservationId: command.reservationId,
+          destinationAccountId: command.destinationAccountId,
+          assetCode,
+          amountAtomic: captured.toString(),
+        },
+      },
+    });
+
+    await trx
+      .insertInto('ledger.captures')
+      .values({
+        transaction_id: posted.transactionId,
+        reservation_id: command.reservationId,
+        destination_account_id: command.destinationAccountId,
+        amount: captured.toString(),
+      })
+      .execute();
+
+    const stillRemaining = remaining - captured;
+    const state: ReservationState = stillRemaining === 0n ? 'captured' : 'partially_captured';
+    await trx
+      .updateTable('ledger.reservations')
+      .set({
+        captured_amount: (BigInt(reservation.captured_amount) + captured).toString(),
+        state,
+        updated_at: new Date(),
+      })
+      .where('id', '=', command.reservationId)
+      .execute();
+
+    return {
+      transactionId: posted.transactionId,
+      correlationId: posted.correlationId,
+      reservationId: command.reservationId,
+      assetCode,
+      requestedAmountAtomic: command.amountAtomic.toString(),
+      capturedAmountAtomic: captured.toString(),
+      remainingAmountAtomic: stillRemaining.toString(),
+      capped: captured < command.amountAtomic,
+      state,
     };
   }
 }

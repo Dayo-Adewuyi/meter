@@ -94,3 +94,27 @@ export interface ReservationResult {
   readonly state: ReservationState;
   readonly replayed: boolean;
 }
+
+export interface CaptureCommand {
+  readonly idempotencyScope: string;
+  readonly idempotencyKey: string;
+  readonly correlationId: string;
+  readonly reservationId: string;
+  readonly destinationAccountId: string;
+  readonly amountAtomic: bigint;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface CaptureResult {
+  readonly transactionId: string;
+  readonly correlationId: string;
+  readonly reservationId: string;
+  readonly assetCode: AssetCode;
+  /** What the caller asked for, kept even when the ceiling reduced it. */
+  readonly requestedAmountAtomic: string;
+  readonly capturedAmountAtomic: string;
+  readonly remainingAmountAtomic: string;
+  readonly capped: boolean;
+  readonly state: ReservationState;
+  readonly replayed: boolean;
+}
