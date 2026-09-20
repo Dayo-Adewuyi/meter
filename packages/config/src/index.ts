@@ -8,9 +8,14 @@ const schema = z.object({
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   CLERK_SECRET_KEY: z.string().optional(),
+  CLERK_JWT_KEY: z.string().optional(),
   CLERK_WEBHOOK_SECRET: z.string().optional(),
   SENTRY_DSN: z.string().optional(),
-});
+}).refine(
+  // Tests inject a fake Clerk client; production must have the real secret.
+  (value) => value.NODE_ENV !== 'production' || (value.CLERK_SECRET_KEY ?? '').length > 0,
+  { message: 'CLERK_SECRET_KEY is required in production', path: ['CLERK_SECRET_KEY'] },
+);
 
 export type Env = z.infer<typeof schema>;
 
