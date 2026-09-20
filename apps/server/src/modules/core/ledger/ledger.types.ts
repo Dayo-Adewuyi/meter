@@ -148,3 +148,22 @@ export interface ReverseCommand {
   readonly transactionId: string;
   readonly reason: string;
 }
+
+export interface RefundCommand {
+  readonly idempotencyScope: string;
+  readonly idempotencyKey: string;
+  readonly correlationId: string;
+  readonly captureTransactionId: string;
+  readonly amountAtomic: bigint;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface RefundResult {
+  readonly transactionId: string;
+  readonly correlationId: string;
+  readonly captureTransactionId: string;
+  readonly assetCode: AssetCode;
+  readonly refundedAmountAtomic: string;
+  readonly remainingRefundableAtomic: string;
+  readonly replayed: boolean;
+}
