@@ -4,6 +4,7 @@ import type { NormalBalance } from './account-taxonomy.ts';
 import { projectionDeltas, validateJournal } from './journal.ts';
 import { LedgerError } from './ledger.errors.ts';
 import type {
+  LockedAccount,
   PostJournalCommand,
   PostedBalance,
   PostedJournal,
@@ -36,16 +37,15 @@ export async function acquireLedgerLock(
  * and then call this inside the same SERIALIZABLE transaction, so journal,
  * projections and outbox event commit together or not at all.
  */
-export async function postJournal(
+/**
+ * Locks every named account in sorted UUID order, so any two transactions that
+ * touch the same accounts take them in the same order and cannot deadlock.
+ */
+export async function lockAccounts(
   trx: Transaction<DB>,
-  command: PostJournalCommand,
-): Promise<PostedJournal> {
-  validateJournal(command.entries);
-  await acquireLedgerLock(trx);
-
-  // Sorted so concurrent journals touching the same accounts always lock in the
-  // same order and cannot deadlock against each other.
-  const accountIds = [...new Set(command.entries.map((entry) => entry.accountId))].sort();
+  ids: readonly string[],
+): Promise<LockedAccount[]> {
+  const accountIds = [...new Set(ids)].sort();
   const accounts = await trx
     .selectFrom('ledger.accounts')
     .select(['id', 'asset_code', 'normal_balance', 'purpose', 'status'])
@@ -58,6 +58,20 @@ export async function postJournal(
     const found = new Set(accounts.map((account) => account.id));
     throw new LedgerError('ACCOUNT_NOT_FOUND', accountIds.find((id) => !found.has(id)));
   }
+  return accounts;
+}
+
+export async function postJournal(
+  trx: Transaction<DB>,
+  command: PostJournalCommand,
+): Promise<PostedJournal> {
+  validateJournal(command.entries);
+  await acquireLedgerLock(trx);
+
+  const accounts = await lockAccounts(
+    trx,
+    command.entries.map((entry) => entry.accountId),
+  );
 
   const byId = new Map(accounts.map((account) => [account.id, account]));
   const normalBalances = new Map<string, NormalBalance>();

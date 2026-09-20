@@ -48,10 +48,22 @@ export interface LedgerCommandResult {
   readonly replayed: boolean;
 }
 
-export interface LedgerAccountRow {
+/** The account columns every command needs, as selected and row-locked. */
+export interface LockedAccount {
   readonly id: string;
-  readonly assetCode: string;
-  readonly normalBalance: NormalBalance;
+  readonly asset_code: string;
+  readonly normal_balance: NormalBalance;
   readonly purpose: AccountPurpose;
   readonly status: string;
+}
+
+/** A credit or a controlled debit of a customer's available value. */
+export interface LedgerAmountCommand {
+  readonly idempotencyScope: string;
+  readonly idempotencyKey: string;
+  readonly correlationId: string;
+  readonly availableAccountId: string;
+  readonly assetCode: AssetCode;
+  readonly amountAtomic: bigint;
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
