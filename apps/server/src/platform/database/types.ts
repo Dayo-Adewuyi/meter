@@ -1,4 +1,9 @@
 import type { ColumnType, Insertable, Selectable, Updateable } from 'kysely';
+import type {
+  AccountClass,
+  AccountPurpose,
+  NormalBalance,
+} from '../../modules/core/ledger/account-taxonomy.ts';
 
 export type UserStatus = 'active' | 'suspended' | 'deleted';
 export type UserRole = 'customer' | 'operator' | 'admin';
@@ -33,9 +38,59 @@ export type IdentityExternalIdentity = Selectable<IdentityExternalIdentitiesTabl
 export type NewIdentityExternalIdentity = Insertable<IdentityExternalIdentitiesTable>;
 export type IdentityExternalIdentityUpdate = Updateable<IdentityExternalIdentitiesTable>;
 
+export type AccountOwnerType = 'customer' | 'provider' | 'system';
+
+export interface LedgerAccountsTable {
+  id: ColumnType<string, string | undefined, never>;
+  owner_type: AccountOwnerType;
+  owner_id: string;
+  asset_code: string;
+  account_type: string;
+  account_class: AccountClass;
+  purpose: AccountPurpose;
+  normal_balance: NormalBalance;
+  status: ColumnType<string, string | undefined, string>;
+  customer_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface LedgerTransactionsTable {
+  id: ColumnType<string, string | undefined, never>;
+  transaction_type: string;
+  idempotency_scope: string;
+  idempotency_key: string;
+  state: string;
+  effective_at: ColumnType<Date, Date | undefined, never>;
+  external_reference: string | null;
+  reversal_of: string | null;
+  metadata: ColumnType<JsonValue, JsonValue | undefined, JsonValue>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface LedgerEntriesTable {
+  transaction_id: string;
+  sequence: number;
+  account_id: string;
+  direction: 'debit' | 'credit';
+  amount_atomic: string;
+  asset_code: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface LedgerBalancesTable {
+  account_id: string;
+  posted_amount: ColumnType<string, string | undefined, string>;
+  reserved_amount: ColumnType<string, string | undefined, string>;
+  version: ColumnType<string, string | undefined, string>;
+}
+
 // Generated-by-hand for now; swap to kysely-codegen once the schema settles.
 // Money columns are NUMERIC(38,0) and arrive as strings — convert with @meter/contracts.
 export interface DB {
   'identity.users': IdentityUsersTable;
   'identity.external_identities': IdentityExternalIdentitiesTable;
+  'ledger.accounts': LedgerAccountsTable;
+  'ledger.transactions': LedgerTransactionsTable;
+  'ledger.entries': LedgerEntriesTable;
+  'ledger.balances': LedgerBalancesTable;
 }
