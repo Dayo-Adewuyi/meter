@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsc -p tsconfig.build.json -w --preserveWatchOutput & node --watch dist/bootstrap/api.js",
-    "dev:worker": "tsc -p tsconfig.build.json -w --preserveWatchOutput & node --watch dist/bootstrap/worker.js",
+    "dev": "tsc -p tsconfig.build.json -w --preserveWatchOutput & node --env-file-if-exists=../../.env --watch dist/bootstrap/api.js",
+    "dev:worker": "tsc -p tsconfig.build.json -w --preserveWatchOutput & node --env-file-if-exists=../../.env --watch dist/bootstrap/worker.js",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "start": "node dist/bootstrap/api.js",
     "start:worker": "node dist/bootstrap/worker.js",

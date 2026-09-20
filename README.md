@@ -76,6 +76,12 @@ package to `onlyBuiltDependencies` in `pnpm-workspace.yaml` in its own commit.
 | Arch §7 `packages/ui` | empty | One consumer so far. Add it when a second appears. |
 | Nest CLI for build | `tsc` | TypeScript 7 ships `tsc` only; the CLI needs the programmatic API (back in 7.1). |
 
+Copy `.env.example` to `.env` before `pnpm dev`. The dev and migrate scripts
+read it with Node's own `--env-file-if-exists`, so no dotenv dependency is
+involved and a missing file is not an error. Turbo runs tasks in strict env
+mode, so any variable the app reads must also be listed in `globalPassThroughEnv`
+in `turbo.json` — otherwise it is silently stripped before the task sees it.
+
 `pnpm db:up` binds 5432. If something already holds it, set `METER_PG_PORT=5433`
 and use that port in `DATABASE_URL`.
 

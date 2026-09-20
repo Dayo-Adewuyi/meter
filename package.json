@@ -14,7 +14,7 @@
     "test": "turbo run test",
     "test:financial": "pnpm --filter @meter/server test:financial",
     "db:up": "docker compose up -d",
-    "db:migrate": "node scripts/migrate.ts",
+    "db:migrate": "node --env-file-if-exists=.env scripts/migrate.ts",
     "audit": "pnpm audit --audit-level=high --prod"
   },
   "devDependencies": {
