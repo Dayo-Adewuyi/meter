@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: meter
+      POSTGRES_PASSWORD: meter
+      POSTGRES_DB: meter
+    ports: ["${METER_PG_PORT:-5432}:5432"]
+    volumes: ["meter-pg:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meter"]
+      interval: 5s
+      retries: 10
+volumes:
+  meter-pg:

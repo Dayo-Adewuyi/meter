@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+# Never pull_request_target: it would run fork code with write-scoped secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Third-party actions are pinned to a commit SHA, never a tag — a tag is mutable.
+  CHECKOUT: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  SETUP_NODE: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18@sha256:86c951e05bf56c93d95d397747fb8820ac76cc3bedb78f43abd83eedbe3666ae
+        env:
+          POSTGRES_USER: meter
+          POSTGRES_PASSWORD: meter
+          POSTGRES_DB: meter
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U meter" --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://meter:meter@localhost:5432/meter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version-file: .nvmrc }
+
+      # corepack verifies the pnpm tarball against the hash in package.json,
+      # so no third-party action needs to place a binary on PATH.
+      - run: corepack enable
+
+      # --ignore-scripts: no dependency executes code during install.
+      # --frozen-lockfile: a lockfile that does not match the manifests fails here.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - run: pnpm audit --audit-level=high --prod
+
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: node scripts/migrate.ts
+
+      # Migrations must be reversible against a real database before merge.
+      - run: node scripts/migrate.ts # idempotent re-run
+
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: github/codeql-action/init@977e6ceaea7361825998245d787fa3b4d6b9e5df # v2.27.0
+        with: { languages: javascript-typescript }
+      - uses: github/codeql-action/analyze@977e6ceaea7361825998245d787fa3b4d6b9e5df # v2.27.0

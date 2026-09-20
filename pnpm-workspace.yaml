@@ -1,0 +1,22 @@
+packages:
+  - apps/*
+  - packages/*
+
+# --- Supply-chain controls -------------------------------------------------
+# A compromised release is almost always caught and unpublished within days.
+# Refusing anything published in the last 7 days removes the window the
+# npm worm families (event-stream, Shai-Hulud, chalk/debug) actually exploit.
+minimumReleaseAge: 10080
+minimumReleaseAgeExclude: []
+
+# Install-time code execution is the primary npm attack vector. No package may
+# run a lifecycle script unless it is listed here after a human read the script.
+onlyBuiltDependencies: []
+dangerouslyAllowAllBuilds: false
+strictDepBuilds: true
+
+# node_modules must match the lockfile before any script runs.
+verifyDepsBeforeRun: error
+
+# Resolve nothing outside the lockfile's recorded range.
+resolutionMode: lowest-direct

@@ -1,0 +1,25 @@
+{
+  "name": "meter",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0+sha512.19cc852c120c7125760f2443ee6be0ca5b40f9f50598de1a09a1f177503e010e57c23c77646e01e761de59bf874fb22a3398c33ab9691fc13eb946b6f0f4d620",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:up": "docker compose up -d",
+    "db:migrate": "node scripts/migrate.ts",
+    "audit": "pnpm audit --audit-level=high --prod"
+  },
+  "devDependencies": {
+    "pg": "8.23.0",
+    "turbo": "2.10.12",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0"
+  }
+}

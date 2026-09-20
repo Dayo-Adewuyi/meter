@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: meter-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: frankfurt
+    plan: starter
+    healthCheckPath: /v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+
+  # §6.3: combined with the API during the concierge beta, split before public launch.
+  - type: worker
+    name: meter-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node dist/bootstrap/worker.js
+    region: frankfurt
+    plan: starter
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
