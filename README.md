@@ -85,6 +85,28 @@ in `turbo.json` — otherwise it is silently stripped before the task sees it.
 `pnpm db:up` binds 5432. If something already holds it, set `METER_PG_PORT=5433`
 and use that port in `DATABASE_URL`.
 
+## Clerk
+
+The server needs environment values only — `@clerk/backend` is already a
+dependency and no frontend scaffolding is involved. From the Clerk dashboard:
+
+| Variable | Dashboard location | Required |
+| --- | --- | --- |
+| `CLERK_SECRET_KEY` | API keys -> Secret key (`sk_...`) | Yes, enforced in production |
+| `CLERK_JWT_KEY` | API keys -> JWT public key (PEM) | No; set it to verify tokens without a JWKS fetch |
+| `CLERK_WEBHOOK_SECRET` | Webhooks -> endpoint -> Signing secret (`whsec_...`) | Yes, to provision users |
+
+Put them in `.env`, never in a committed file.
+
+Clerk owns authentication; Meter owns identity. A Clerk subject is never a
+financial key. `POST /v1/webhooks/clerk` maps a subject to an internal UUIDv7
+user, and until that row exists the guard denies with `IDENTITY_NOT_FOUND`. In
+the dashboard, point a webhook endpoint at `<public-url>/v1/webhooks/clerk` and
+subscribe to `user.created`, `user.updated` and `user.deleted`. The route is
+signature-verified, replay-protected, and rejects an event ID reused with
+different bytes. `user.deleted` suspends the user rather than removing the row,
+because ledger accounts reference it.
+
 ## Financial invariant suite
 
 Every change that touches money must pass the mandatory financial suite before

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebhookEventClaim, WebhookEventsRepository } from './webhook-events.repository.ts';
 import { WebhookSecurityService } from './webhook-security.service.ts';
-import { WebhookVerificationMiddleware } from './webhook-verification.middleware.ts';
+import { WebhookVerificationGuard } from './webhook-verification.guard.ts';
 import type { WebhookVerifier } from './webhook-verifier.port.ts';
 
 /** Same claim semantics as PostgreSQL, without the round trip. */
@@ -86,15 +86,15 @@ describe('webhook security service', () => {
   });
 });
 
-describe('webhook verification middleware', () => {
-  let middleware: WebhookVerificationMiddleware;
+describe('webhook verification guard', () => {
+  let guard: WebhookVerificationGuard;
   let verifier: WebhookVerifier;
 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(SIGNED_AT);
     verifier = verifierFor();
-    middleware = new WebhookVerificationMiddleware(new WebhookSecurityService(inMemoryRepository()), {
+    guard = new WebhookVerificationGuard(new WebhookSecurityService(inMemoryRepository()), {
       provider: 'clerk',
       verifier,
     });
@@ -104,38 +104,62 @@ describe('webhook verification middleware', () => {
     vi.useRealTimers();
   });
 
-  const request = (body: string | undefined) =>
-    ({ rawBody: body === undefined ? undefined : Buffer.from(body), headers: {} }) as never;
+  const contextFor = (body: string | undefined) => {
+    const request: Record<string, unknown> = {
+      rawBody: body === undefined ? undefined : Buffer.from(body),
+      headers: {},
+    };
+    return {
+      request,
+      context: { switchToHttp: () => ({ getRequest: () => request }) } as never,
+    };
+  };
 
-  it('freezes the verified envelope on the request and continues', async () => {
-    const next = vi.fn();
-    const target = request('{"ok":true}');
+  it('freezes the verified envelope on the request and admits it', async () => {
+    const { context, request } = contextFor('{"ok":true}');
 
-    await middleware.use(target, {} as never, next);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
 
-    expect(next).toHaveBeenCalledTimes(1);
-    const verified = (target as { verifiedWebhook?: unknown }).verifiedWebhook;
-    expect(verified).toEqual({ provider: 'clerk', eventId: 'evt_1', signedAt: SIGNED_AT, outcome: 'accepted' });
-    expect(Object.isFrozen(verified)).toBe(true);
-  });
-
-  it('continues on an identical replay so the handler can acknowledge it', async () => {
-    const next = vi.fn();
-    await middleware.use(request('{"ok":true}'), {} as never, next);
-    const replay = request('{"ok":true}');
-
-    await middleware.use(replay, {} as never, next);
-
-    expect(next).toHaveBeenCalledTimes(2);
-    expect((replay as { verifiedWebhook?: { outcome: string } }).verifiedWebhook?.outcome).toBe('duplicate');
-  });
-
-  it('propagates rejection without calling next', async () => {
-    const next = vi.fn();
-
-    await expect(middleware.use(request(undefined), {} as never, next)).rejects.toMatchObject({
-      code: 'WEBHOOK_BODY_MISSING',
+    expect(request.verifiedWebhook).toEqual({
+      provider: 'clerk',
+      eventId: 'evt_1',
+      signedAt: SIGNED_AT,
+      outcome: 'accepted',
     });
-    expect(next).not.toHaveBeenCalled();
+    expect(Object.isFrozen(request.verifiedWebhook)).toBe(true);
+  });
+
+  it('admits an identical replay so the handler can acknowledge it', async () => {
+    await guard.canActivate(contextFor('{"ok":true}').context);
+    const replay = contextFor('{"ok":true}');
+
+    await expect(guard.canActivate(replay.context)).resolves.toBe(true);
+    expect((replay.request.verifiedWebhook as { outcome: string }).outcome).toBe('duplicate');
+  });
+
+  it.each([
+    ['a missing raw body', undefined, 400, 'WEBHOOK_BODY_MISSING'],
+    ['a reused event id', '{"ok":false}', 409, 'WEBHOOK_EVENT_CONFLICT'],
+  ])('turns %s into a real status rather than hanging', async (_name, body, status, code) => {
+    if (body !== undefined) await guard.canActivate(contextFor('{"ok":true}').context);
+    const { context, request } = contextFor(body);
+
+    const error = await guard.canActivate(context).catch((e: unknown) => e);
+
+    expect((error as { getStatus: () => number }).getStatus()).toBe(status);
+    expect((error as { getResponse: () => unknown }).getResponse()).toEqual({ code });
+    expect(request.verifiedWebhook).toBeUndefined();
+  });
+
+  it('rejects a stale signature with 401', async () => {
+    vi.setSystemTime(new Date('2026-09-20T12:05:01Z'));
+    const { context } = contextFor('{}');
+
+    const error = await guard.canActivate(context).catch((e: unknown) => e);
+
+    expect((error as { getStatus: () => number }).getStatus()).toBe(401);
+    expect((error as { getResponse: () => unknown }).getResponse()).toEqual({
+      code: 'WEBHOOK_TIMESTAMP_EXPIRED',
+    });
   });
 });

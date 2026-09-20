@@ -24,6 +24,9 @@ const pool = new pg.Pool({
 })
 export class DatabaseModule implements OnApplicationShutdown {
   async onApplicationShutdown(): Promise<void> {
+    // Shutdown can fire more than once (nested test apps, repeated close);
+    // pg throws on a second end().
+    if (pool.ending || pool.ended) return;
     await pool.end();
   }
 }
