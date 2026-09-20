@@ -48,7 +48,7 @@ export async function lockAccounts(
   const accountIds = [...new Set(ids)].sort();
   const accounts = await trx
     .selectFrom('ledger.accounts')
-    .select(['id', 'asset_code', 'normal_balance', 'purpose', 'status'])
+    .select(['id', 'asset_code', 'normal_balance', 'purpose', 'status', 'customer_id'])
     .where('id', 'in', accountIds)
     .orderBy('id')
     .forUpdate()

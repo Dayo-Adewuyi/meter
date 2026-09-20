@@ -55,6 +55,7 @@ export interface LockedAccount {
   readonly normal_balance: NormalBalance;
   readonly purpose: AccountPurpose;
   readonly status: string;
+  readonly customer_id: string | null;
 }
 
 /** A credit or a controlled debit of a customer's available value. */
@@ -66,4 +67,30 @@ export interface LedgerAmountCommand {
   readonly assetCode: AssetCode;
   readonly amountAtomic: bigint;
   readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export type ReservationState = 'open' | 'partially_captured' | 'captured' | 'released';
+
+export interface ReserveCommand {
+  readonly idempotencyScope: string;
+  readonly idempotencyKey: string;
+  readonly correlationId: string;
+  readonly availableAccountId: string;
+  readonly reservedAccountId: string;
+  readonly assetCode: AssetCode;
+  readonly amountAtomic: bigint;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface ReservationResult {
+  readonly reservationId: string;
+  readonly transactionId: string;
+  readonly correlationId: string;
+  readonly assetCode: AssetCode;
+  readonly originalAmountAtomic: string;
+  readonly capturedAmountAtomic: string;
+  readonly releasedAmountAtomic: string;
+  readonly remainingAmountAtomic: string;
+  readonly state: ReservationState;
+  readonly replayed: boolean;
 }

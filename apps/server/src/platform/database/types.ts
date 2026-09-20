@@ -78,6 +78,37 @@ export interface LedgerEntriesTable {
   created_at: ColumnType<Date, Date | undefined, never>;
 }
 
+export type ReservationState = 'open' | 'partially_captured' | 'captured' | 'released';
+
+export interface LedgerReservationsTable {
+  id: ColumnType<string, string | undefined, never>;
+  reserve_transaction_id: string;
+  available_account_id: string;
+  reserved_account_id: string;
+  asset_code: string;
+  original_amount: string;
+  captured_amount: ColumnType<string, string | undefined, string>;
+  released_amount: ColumnType<string, string | undefined, string>;
+  state: ColumnType<ReservationState, ReservationState | undefined, ReservationState>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface LedgerCapturesTable {
+  transaction_id: string;
+  reservation_id: string;
+  destination_account_id: string;
+  amount: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface LedgerRefundsTable {
+  transaction_id: string;
+  capture_transaction_id: string;
+  amount: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
 export interface LedgerIdempotencyTable {
   scope: string;
   key: string;
@@ -133,6 +164,9 @@ export interface DB {
   'ledger.entries': LedgerEntriesTable;
   'ledger.balances': LedgerBalancesTable;
   'ledger.idempotency': LedgerIdempotencyTable;
+  'ledger.reservations': LedgerReservationsTable;
+  'ledger.captures': LedgerCapturesTable;
+  'ledger.refunds': LedgerRefundsTable;
   'operations.external_events': OperationsExternalEventsTable;
   'operations.outbox': OperationsOutboxTable;
 }
