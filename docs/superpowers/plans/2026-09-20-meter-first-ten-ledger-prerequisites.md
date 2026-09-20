@@ -12,7 +12,7 @@
 
 - Preserve every pre-existing staged change; do not reset, overwrite, or fold it into unrelated commits.
 - Add migrations after `0003_outbox.sql`; never edit an already-applied migration.
-- Money is `bigint` in server code, decimal strings on JSON boundaries, and `NUMERIC(38,0)` in PostgreSQL. JavaScript `number` is prohibited for money.
+- Money is `bigint` in domain/application code, decimal strings on JSON boundaries, and `NUMERIC(38,0)` in PostgreSQL. The raw Kysely/`pg` persistence row uses strings because PostgreSQL returns `NUMERIC(38,0)` losslessly as text; ledger adapters convert at the boundary before values enter domain/application code. JavaScript `number` is prohibited for money.
 - Only the ledger module writes `ledger.*`; posted entries are append-only.
 - Every financial command runs at `SERIALIZABLE`, accepts an idempotency scope and key, and makes no external network call inside its transaction.
 - Every command writes its journal, entries, projections, reservation state when applicable, idempotent result, and outbox event atomically.
