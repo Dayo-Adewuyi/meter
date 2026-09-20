@@ -71,7 +71,8 @@ describe('webhook replay protection', () => {
             external_id: 'evt_pg_3',
             payload_digest: digest('{}'),
             provider_event_at: new Date(),
-            status: 'mystery',
+            // Deliberately invalid: the check constraint must reject it.
+            status: 'mystery' as never,
           })
           .execute(),
       ).rejects.toMatchObject({ code: '23514' });

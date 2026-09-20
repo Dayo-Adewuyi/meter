@@ -1,7 +1,9 @@
 import { runMigrations, withTestDatabase } from '@meter/testing';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { testDb } from '../../../test/support/database.ts';
+import type { UserRole } from '../../../platform/database/types.ts';
+import { testDb, withMigratedDb } from '../../../test/support/database.ts';
+import { PostgresIdentityRepository } from './postgres-identity.repository.ts';
 
 function versionNibble(uuid: string): string {
   return uuid[14] ?? '';
@@ -36,4 +38,37 @@ describe('identity migration', () => {
       }
     });
   }, 30_000);
+});
+
+describe('postgres identity repository', () => {
+  it('resolves an active subject to its internal principal and denies everything else', async () => {
+    await withMigratedDb(async (db) => {
+      const repository = new PostgresIdentityRepository(db);
+      const insertUser = (status: 'active' | 'suspended', roles: UserRole[]) =>
+        db
+          .insertInto('identity.users')
+          .values({ status, roles })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+
+      const active = await insertUser('active', ['customer', 'operator']);
+      const suspended = await insertUser('suspended', ['customer']);
+      await db
+        .insertInto('identity.external_identities')
+        .values([
+          { provider: 'clerk', external_subject: 'user_active', user_id: active.id },
+          { provider: 'clerk', external_subject: 'user_suspended', user_id: suspended.id },
+        ])
+        .execute();
+
+      await expect(repository.findPrincipal('clerk', 'user_active')).resolves.toEqual({
+        userId: active.id,
+        roles: ['customer', 'operator'],
+        restrictionState: 'unrestricted',
+      });
+      await expect(repository.findPrincipal('clerk', 'user_suspended')).resolves.toBeNull();
+      await expect(repository.findPrincipal('clerk', 'user_unknown')).resolves.toBeNull();
+      await expect(repository.findPrincipal('other', 'user_active')).resolves.toBeNull();
+    });
+  }, 60_000);
 });

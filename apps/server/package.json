@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsc -p tsconfig.json -w --preserveWatchOutput & node --watch dist/bootstrap/api.js",
-    "dev:worker": "tsc -p tsconfig.json -w --preserveWatchOutput & node --watch dist/bootstrap/worker.js",
-    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.build.json -w --preserveWatchOutput & node --watch dist/bootstrap/api.js",
+    "dev:worker": "tsc -p tsconfig.build.json -w --preserveWatchOutput & node --watch dist/bootstrap/worker.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "start": "node dist/bootstrap/api.js",
     "start:worker": "node dist/bootstrap/worker.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",

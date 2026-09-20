@@ -18,6 +18,8 @@ type AccountValues = {
   purpose?: string;
 };
 
+// The cast is the point: these rows are deliberately invalid, and the database
+// — not TypeScript — must be the thing that rejects them.
 function insertAccount(db: ReturnType<typeof testDb>, values: AccountValues = {}) {
   return db
     .insertInto('ledger.accounts')
@@ -32,7 +34,7 @@ function insertAccount(db: ReturnType<typeof testDb>, values: AccountValues = {}
       normal_balance: 'debit',
       customer_id: null,
       ...values,
-    })
+    } as never)
     .execute();
 }
 
