@@ -140,3 +140,11 @@ export interface ReleaseResult {
   readonly state: ReservationState;
   readonly replayed: boolean;
 }
+
+export interface ReverseCommand {
+  readonly idempotencyScope: string;
+  readonly idempotencyKey: string;
+  readonly correlationId: string;
+  readonly transactionId: string;
+  readonly reason: string;
+}
