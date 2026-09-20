@@ -57,8 +57,8 @@ export interface LedgerAccountsTable {
 export interface LedgerTransactionsTable {
   id: ColumnType<string, string | undefined, never>;
   transaction_type: string;
-  idempotency_scope: string;
-  idempotency_key: string;
+  idempotency_scope: ColumnType<string | null, string | null | undefined, string | null>;
+  idempotency_key: ColumnType<string | null, string | null | undefined, string | null>;
   state: string;
   effective_at: ColumnType<Date, Date | undefined, never>;
   external_reference: string | null;
@@ -75,6 +75,17 @@ export interface LedgerEntriesTable {
   amount_atomic: string;
   asset_code: string;
   created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface LedgerIdempotencyTable {
+  scope: string;
+  key: string;
+  request_digest: string;
+  state: ColumnType<'pending' | 'completed', 'pending' | 'completed' | undefined, 'pending' | 'completed'>;
+  transaction_id: ColumnType<string | null, string | null | undefined, string | null>;
+  result: ColumnType<JsonValue | null, string | null | undefined, string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  completed_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
 }
 
 export interface LedgerBalancesTable {
@@ -120,6 +131,7 @@ export interface DB {
   'ledger.transactions': LedgerTransactionsTable;
   'ledger.entries': LedgerEntriesTable;
   'ledger.balances': LedgerBalancesTable;
+  'ledger.idempotency': LedgerIdempotencyTable;
   'operations.external_events': OperationsExternalEventsTable;
   'operations.outbox': OperationsOutboxTable;
 }
