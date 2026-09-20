@@ -49,6 +49,7 @@
 - `apps/server/src/platform/security/webhooks/webhook-verifier.port.ts`: provider verification contract.
 - `apps/server/src/platform/security/webhooks/webhook-events.repository.ts`: event-claim persistence contract and PostgreSQL implementation.
 - `apps/server/src/platform/security/webhooks/webhook-security.service.ts`: signature result, timestamp-window, digest, and replay policy.
+- `apps/server/src/platform/security/webhooks/webhook-verification.middleware.ts`: reusable Nest middleware that passes exact raw bytes through the shared policy.
 - `apps/server/src/platform/security/webhooks/webhook-security.module.ts`: shared provider-neutral module.
 
 ### Ledger
@@ -265,6 +266,7 @@ git commit -m "feat(ledger): define account taxonomy"
 - Create: `apps/server/src/platform/security/webhooks/webhook-verifier.port.ts`
 - Create: `apps/server/src/platform/security/webhooks/webhook-events.repository.ts`
 - Create: `apps/server/src/platform/security/webhooks/webhook-security.service.ts`
+- Create: `apps/server/src/platform/security/webhooks/webhook-verification.middleware.ts`
 - Create: `apps/server/src/platform/security/webhooks/webhook-security.module.ts`
 - Create: `apps/server/src/platform/security/webhooks/webhook-security.test.ts`
 - Create: `apps/server/src/platform/security/webhooks/webhook-security.integration.test.ts`
@@ -275,6 +277,7 @@ git commit -m "feat(ledger): define account taxonomy"
 - Consumes: exact raw request bytes from Nest `RawBodyRequest<FastifyRequest>`.
 - Produces: `WebhookVerifier.verify(input): Promise<VerifiedWebhookEnvelope>`.
 - Produces: `WebhookSecurityService.verifyAndClaim(input): Promise<'accepted' | 'duplicate'>`.
+- Produces: `WebhookVerificationMiddleware.use(request, response, next)` and `request.verifiedWebhook`.
 
 - [ ] **Step 1: Write failing timestamp, digest, and replay tests**
 
@@ -318,6 +321,15 @@ export interface WebhookVerifier {
 ```
 
 `WebhookSecurityService` must reject a missing raw body, call the verifier before persistence, enforce `Math.abs(now - signedAt) <= 300_000`, hash the exact `Buffer` with SHA-256, and call the repository with provider, event ID, digest, and signed time. The repository must use `INSERT ... ON CONFLICT DO NOTHING`; on conflict it loads the stored digest and returns duplicate only when the digest matches.
+
+`WebhookVerificationMiddleware` receives provider and verifier through injected
+configuration, reads Nest's `RawBodyRequest<FastifyRequest>.rawBody`, calls the
+shared service, freezes the verified envelope on `request.verifiedWebhook`, and
+calls `next()` only after acceptance or an identical replay. Signature,
+timestamp, missing-body, and event-conflict errors must propagate to Nest's
+exception layer without calling `next()`. Unit-test the middleware with real
+service behavior and an in-memory event repository; do not assert only that a
+mock was called.
 
 - [ ] **Step 4: Harden the external-event schema and raw body bootstrap**
 
