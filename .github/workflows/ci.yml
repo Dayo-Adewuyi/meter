@@ -57,6 +57,38 @@ jobs:
       # Migrations must be reversible against a real database before merge.
       - run: node scripts/migrate.ts # idempotent re-run
 
+  # Money invariants get their own required job: they must never be able to pass
+  # by being skipped inside a generic test step.
+  financial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18@sha256:86c951e05bf56c93d95d397747fb8820ac76cc3bedb78f43abd83eedbe3666ae
+        env:
+          POSTGRES_USER: meter
+          POSTGRES_PASSWORD: meter
+          POSTGRES_DB: meter
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U meter" --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://meter:meter@localhost:5432/meter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version-file: .nvmrc }
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - run: node scripts/migrate.ts
+
+      - run: pnpm test:financial
+
   codeql:
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -73,8 +73,27 @@ package to `onlyBuiltDependencies` in `pnpm-workspace.yaml` in its own commit.
 | --- | --- | --- |
 | Arch §7 flat `modules/`, incl. `ai` | `modules/core` + `modules/products` | PRD §5 separates Meter Core from verticals. Flat, `ai` reads as core. |
 | Arch §11.1 schema `authorization` | `authz` | Reserved word in PostgreSQL; the doc's name needs double quotes in every query. |
-| Arch §7 `packages/ui`, `packages/testing` | empty | One consumer each so far. Add them when a second appears. |
+| Arch §7 `packages/ui` | empty | One consumer so far. Add it when a second appears. |
 | Nest CLI for build | `tsc` | TypeScript 7 ships `tsc` only; the CLI needs the programmatic API (back in 7.1). |
 
 `pnpm db:up` binds 5432. If something already holds it, set `METER_PG_PORT=5433`
 and use that port in `DATABASE_URL`.
+
+## Financial invariant suite
+
+Every change that touches money must pass the mandatory financial suite before
+merge. It runs against a real PostgreSQL 18 and is a separate required CI job
+(`financial`), never folded into the generic test step.
+
+```bash
+pnpm db:up
+DATABASE_URL=postgres://meter:meter@localhost:5432/meter pnpm db:migrate
+DATABASE_URL=postgres://meter:meter@localhost:5432/meter pnpm test:financial
+```
+
+The suite covers eight named invariants: journals balance by asset, posted
+entries cannot be edited or deleted, available balance cannot go negative,
+concurrent authorizations cannot overspend, capture cannot exceed its
+reservation, capture plus release equals the original reservation, recognized
+retries cannot create value, and a projection rebuild reproduces the recorded
+balances.
