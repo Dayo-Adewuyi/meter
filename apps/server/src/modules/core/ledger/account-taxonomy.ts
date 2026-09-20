@@ -20,6 +20,15 @@ export const ACCOUNT_PURPOSES = [
 
 export const SYSTEM_OWNER_ID = '00000000-0000-0000-0000-000000000000';
 
+/** Seeded by `0005_ledger_taxonomy.sql`; deterministic so commands can name them. */
+export const SYSTEM_ACCOUNT_IDS = {
+  external_cash: '00000000-0000-7000-8000-000000000001',
+  meter_revenue: '00000000-0000-7000-8000-000000000002',
+  provider_payable: '00000000-0000-7000-8000-000000000003',
+  reserve: '00000000-0000-7000-8000-000000000004',
+  tax_liability: '00000000-0000-7000-8000-000000000005',
+} as const;
+
 export type AccountClass = (typeof ACCOUNT_CLASSES)[number];
 export type AccountPurpose = (typeof ACCOUNT_PURPOSES)[number];
 export type NormalBalance = 'debit' | 'credit';

@@ -61,8 +61,9 @@ export interface LedgerTransactionsTable {
   idempotency_key: ColumnType<string | null, string | null | undefined, string | null>;
   state: string;
   effective_at: ColumnType<Date, Date | undefined, never>;
-  external_reference: string | null;
-  reversal_of: string | null;
+  external_reference: ColumnType<string | null, string | null | undefined, string | null>;
+  reversal_of: ColumnType<string | null, string | null | undefined, string | null>;
+  correlation_id: string;
   metadata: ColumnType<JsonValue, JsonValue | undefined, JsonValue>;
   created_at: ColumnType<Date, Date | undefined, never>;
 }

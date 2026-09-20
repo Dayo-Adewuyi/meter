@@ -166,8 +166,7 @@ describe('ledger account taxonomy migration', () => {
           .insertInto('ledger.transactions')
           .values({
             transaction_type: 'test',
-            idempotency_scope: 'test',
-            idempotency_key: randomUUID(),
+            correlation_id: randomUUID(),
             state: 'posted',
           })
           .returning('id')

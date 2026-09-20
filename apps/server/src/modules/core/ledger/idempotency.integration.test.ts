@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Kysely, Transaction } from 'kysely';
 import { describe, expect, it, vi } from 'vitest';
 import { serializable } from '../../../platform/database/transaction.ts';
@@ -15,7 +16,7 @@ function claim(key: string, request: Record<string, unknown>) {
 async function postTransaction(trx: Transaction<DB>): Promise<{ transactionId: string }> {
   const transaction = await trx
     .insertInto('ledger.transactions')
-    .values({ transaction_type: 'test', state: 'posted' })
+    .values({ transaction_type: 'test', state: 'posted', correlation_id: randomUUID() })
     .returning('id')
     .executeTakeFirstOrThrow();
   return { transactionId: transaction.id };
@@ -73,7 +74,7 @@ describe('ledger command idempotency', () => {
     await withMigratedDb(async (db) => {
       const transaction = await db
         .insertInto('ledger.transactions')
-        .values({ transaction_type: 'test', state: 'posted' })
+        .values({ transaction_type: 'test', state: 'posted', correlation_id: randomUUID() })
         .returning('id')
         .executeTakeFirstOrThrow();
 
