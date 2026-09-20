@@ -84,6 +84,33 @@ export interface LedgerBalancesTable {
   version: ColumnType<string, string | undefined, string>;
 }
 
+export type ExternalEventStatus = 'verified' | 'processing' | 'processed' | 'failed';
+
+export interface OperationsExternalEventsTable {
+  provider: string;
+  external_id: string;
+  received_at: ColumnType<Date, Date | undefined, never>;
+  payload_digest: string;
+  provider_event_at: ColumnType<Date, Date, Date>;
+  status: ColumnType<ExternalEventStatus, ExternalEventStatus | undefined, ExternalEventStatus>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface OperationsOutboxTable {
+  id: ColumnType<string, string | undefined, never>;
+  aggregate_type: string;
+  aggregate_id: string;
+  event_type: string;
+  schema_version: ColumnType<number, number | undefined, number>;
+  payload: ColumnType<JsonValue, JsonValue, JsonValue>;
+  correlation_id: string;
+  status: ColumnType<string, string | undefined, string>;
+  attempts: ColumnType<number, number | undefined, number>;
+  next_attempt_at: ColumnType<Date, Date | undefined, Date>;
+  last_error: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
 // Generated-by-hand for now; swap to kysely-codegen once the schema settles.
 // Money columns are NUMERIC(38,0) and arrive as strings — convert with @meter/contracts.
 export interface DB {
@@ -93,4 +120,6 @@ export interface DB {
   'ledger.transactions': LedgerTransactionsTable;
   'ledger.entries': LedgerEntriesTable;
   'ledger.balances': LedgerBalancesTable;
+  'operations.external_events': OperationsExternalEventsTable;
+  'operations.outbox': OperationsOutboxTable;
 }

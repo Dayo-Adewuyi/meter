@@ -11,7 +11,8 @@ const app = await NestFactory.create<NestFastifyApplication>(
     // Webhook signature verification needs the exact bytes (§15.1).
     bodyLimit: 1_048_576,
   }),
-  { bufferLogs: true },
+  // Webhook middleware needs `request.rawBody` (§15.1).
+  { bufferLogs: true, rawBody: true },
 );
 
 app.setGlobalPrefix('v1');
