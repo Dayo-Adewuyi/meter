@@ -9,7 +9,8 @@
     "start": "node dist/bootstrap/api.js",
     "start:worker": "node dist/bootstrap/worker.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:financial": "vitest run --config vitest.financial.config.ts"
   },
   "dependencies": {
     "@clerk/backend": "3.17.2",

@@ -7,6 +7,7 @@ import type { DB } from '../../platform/database/types.ts';
 
 export interface LedgerFixture {
   readonly customerId: string;
+  readonly providerId: string;
   readonly available: string;
   readonly reserved: string;
   readonly pending: string;
@@ -51,6 +52,25 @@ export async function createLedgerFixture(
     .returning(['id', 'purpose'])
     .execute();
 
+  // A payable account of this fixture's own, so concurrent fixtures in one
+  // database never share a capture destination.
+  const providerId = randomUUID();
+  const payable = await db
+    .insertInto('ledger.accounts')
+    .values({
+      id: randomUUID(),
+      owner_type: 'provider',
+      owner_id: providerId,
+      customer_id: null,
+      asset_code: 'NGN',
+      account_type: 'provider_payable',
+      account_class: 'provider_liability',
+      purpose: 'provider_payable',
+      normal_balance: 'credit',
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+
   const idFor = (purpose: string): string => {
     const account = accounts.find((row) => row.purpose === purpose);
     if (account === undefined) throw new Error(`fixture is missing ${purpose}`);
@@ -59,11 +79,12 @@ export async function createLedgerFixture(
 
   const fixture: LedgerFixture = {
     customerId: customer.id,
+    providerId,
     available: idFor('customer_available'),
     reserved: idFor('customer_reserved'),
     pending: idFor('customer_pending'),
     externalCash: SYSTEM_ACCOUNT_IDS.external_cash,
-    payable: SYSTEM_ACCOUNT_IDS.provider_payable,
+    payable: payable.id,
     revenue: SYSTEM_ACCOUNT_IDS.meter_revenue,
     assetCode: 'NGN',
 
