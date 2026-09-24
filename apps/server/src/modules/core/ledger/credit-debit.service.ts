@@ -133,7 +133,7 @@ export async function externalCashAccountId(
   return account.id;
 }
 
-export async function postedAmount(trx: Transaction<DB>, accountId: string): Promise<bigint> {
+export async function postedAmount(trx: Kysely<DB>, accountId: string): Promise<bigint> {
   const balance = await trx
     .selectFrom('ledger.balances')
     .select('posted_amount')

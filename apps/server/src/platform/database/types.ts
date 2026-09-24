@@ -154,6 +154,126 @@ export interface OperationsOutboxTable {
   created_at: ColumnType<Date, Date | undefined, never>;
 }
 
+export interface AuthzMandatesTable {
+  id: ColumnType<string, string | undefined, never>;
+  owner_id: string;
+  name: string;
+  asset_code: string;
+  available_account_id: string;
+  reserved_account_id: string;
+  status: ColumnType<'active' | 'revoked', 'active' | 'revoked' | undefined, 'active' | 'revoked'>;
+  per_transaction_limit: string;
+  daily_limit: string;
+  lifetime_limit: string;
+  velocity_max_count: number;
+  velocity_window_secs: number;
+  max_in_flight: ColumnType<number, number | undefined, number>;
+  duplicate_window_secs: ColumnType<number, number | undefined, number>;
+  allowed_categories: string[];
+  allowed_destinations: string[] | null;
+  expires_at: Date;
+  revoked_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  revoked_reason: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface AuthzAgentCredentialsTable {
+  id: ColumnType<string, string | undefined, never>;
+  mandate_id: string;
+  public_id: string;
+  secret_hash: Buffer;
+  label: string;
+  scopes: string[];
+  status: ColumnType<'active' | 'revoked', 'active' | 'revoked' | undefined, 'active' | 'revoked'>;
+  expires_at: Date;
+  last_used_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  revoked_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export type AuthorizationState = 'authorized' | 'captured' | 'released' | 'expired';
+
+export interface AuthzAuthorizationsTable {
+  id: ColumnType<string, string | undefined, never>;
+  mandate_id: string;
+  credential_id: string;
+  reservation_id: string;
+  asset_code: string;
+  amount: string;
+  captured_amount: ColumnType<string, string | undefined, string>;
+  category: string;
+  destination: string;
+  state: ColumnType<AuthorizationState, AuthorizationState | undefined, AuthorizationState>;
+  hold_expires_at: Date;
+  correlation_id: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  finalized_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+
+export interface AuthzDecisionsTable {
+  id: ColumnType<string, string | undefined, never>;
+  mandate_id: string | null;
+  credential_id: string | null;
+  outcome: 'approved' | 'declined';
+  reason_code: string | null;
+  evaluated: ColumnType<JsonValue, string, never>;
+  request_digest: string;
+  authorization_id: string | null;
+  correlation_id: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export type DeliveryStatus =
+  | 'declined'
+  | 'pending_dispatch'
+  | 'dispatching'
+  | 'awaiting_confirmation'
+  | 'unresolved'
+  | 'delivered'
+  | 'rejected'
+  | 'expired';
+
+export interface AgentsPurchasesTable {
+  id: ColumnType<string, string | undefined, never>;
+  credential_id: string;
+  idempotency_key: string;
+  request_digest: string;
+  authorization_id: string | null;
+  decision_id: string;
+  category: 'airtime';
+  network: 'mtn' | 'airtel' | 'glo' | '9mobile';
+  destination: string;
+  amount: string;
+  asset_code: string;
+  intent: string;
+  canonical_state: string;
+  delivery_status: DeliveryStatus;
+  send_attempts: ColumnType<number, number | undefined, number>;
+  requery_attempts: ColumnType<number, number | undefined, number>;
+  next_action_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  lease_until: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  dispatch_started_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  resolve_deadline_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  provider_reference: ColumnType<string | null, string | null | undefined, string | null>;
+  last_provider_outcome: ColumnType<JsonValue | null, string | null | undefined, string | null>;
+  correlation_id: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface AgentsPurchaseEventsTable {
+  id: ColumnType<string, string | undefined, never>;
+  purchase_id: string;
+  from_status: string | null;
+  to_status: string;
+  actor: string;
+  reason: string;
+  detail: ColumnType<JsonValue, string | undefined, never>;
+  ledger_transaction_id: string | null;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
 // Generated-by-hand for now; swap to kysely-codegen once the schema settles.
 // Money columns are NUMERIC(38,0) and arrive as strings — convert with @meter/contracts.
 export interface DB {
@@ -169,4 +289,10 @@ export interface DB {
   'ledger.refunds': LedgerRefundsTable;
   'operations.external_events': OperationsExternalEventsTable;
   'operations.outbox': OperationsOutboxTable;
+  'authz.mandates': AuthzMandatesTable;
+  'authz.agent_credentials': AuthzAgentCredentialsTable;
+  'authz.authorizations': AuthzAuthorizationsTable;
+  'authz.decisions': AuthzDecisionsTable;
+  'agents.purchases': AgentsPurchasesTable;
+  'agents.purchase_events': AgentsPurchaseEventsTable;
 }
