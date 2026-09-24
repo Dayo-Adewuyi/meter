@@ -8,7 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "e2e": "playwright test",
-    "test": "vitest run"
+    "test": "vitest run",
+    "icons": "node scripts/render-icons.mjs"
   },
   "dependencies": {
     "@clerk/react": "6.16.1",
