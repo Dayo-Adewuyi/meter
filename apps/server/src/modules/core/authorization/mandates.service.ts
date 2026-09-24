@@ -22,6 +22,7 @@ export interface CreateMandateInput {
   readonly duplicateWindowSecs?: number;
   readonly allowedCategories: readonly string[];
   readonly allowedDestinations: readonly string[] | null;
+  readonly allowedCounterparties?: readonly string[] | null;
   readonly expiresAt: Date;
 }
 
@@ -63,6 +64,7 @@ export class MandatesService {
           ...(input.duplicateWindowSecs === undefined ? {} : { duplicate_window_secs: input.duplicateWindowSecs }),
           allowed_categories: [...input.allowedCategories],
           allowed_destinations: input.allowedDestinations === null ? null : [...input.allowedDestinations],
+          allowed_counterparties: input.allowedCounterparties == null ? null : input.allowedCounterparties.map((a) => a.toLowerCase()),
           expires_at: input.expiresAt,
         })
         .returning('id')
@@ -248,6 +250,7 @@ export class MandatesService {
         duplicate_window_secs: mandate.duplicate_window_secs,
         allowed_categories: mandate.allowed_categories,
         allowed_destinations: mandate.allowed_destinations,
+        allowed_counterparties: mandate.allowed_counterparties,
       },
       exposure: {
         today: money(usage.today),

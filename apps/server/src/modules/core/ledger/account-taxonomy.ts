@@ -29,6 +29,12 @@ export const SYSTEM_ACCOUNT_IDS = {
   tax_liability: '00000000-0000-7000-8000-000000000005',
 } as const;
 
+/** USDC counterparts, seeded by `0012_x402_payments.sql`. */
+export const USDC_SYSTEM_ACCOUNT_IDS = {
+  external_cash: '00000000-0000-7000-8000-000000000011',
+  provider_payable: '00000000-0000-7000-8000-000000000013',
+} as const;
+
 export type AccountClass = (typeof ACCOUNT_CLASSES)[number];
 export type AccountPurpose = (typeof ACCOUNT_PURPOSES)[number];
 export type NormalBalance = 'debit' | 'credit';

@@ -10,6 +10,7 @@ export type DenialCode =
   | 'ACCOUNT_RESTRICTED'
   | 'CATEGORY_NOT_ALLOWED'
   | 'DESTINATION_NOT_ALLOWED'
+  | 'COUNTERPARTY_NOT_ALLOWED'
   | 'PER_TRANSACTION_LIMIT'
   | 'DUPLICATE_SUSPECTED'
   | 'VELOCITY_LIMIT'
@@ -37,7 +38,12 @@ export interface CheckRecord {
 
 export interface PolicyRequest {
   readonly category: string;
+  /** What `allowed_destinations` lists: a phone number for airtime, an origin for x402. */
   readonly destination: string;
+  /** Who is paid, when that differs from the destination (x402 `payTo`). */
+  readonly counterparty?: string;
+  /** What the duplicate guard compares; defaults to `destination`. */
+  readonly duplicateKey?: string;
   readonly amount: bigint;
   readonly confirmDuplicate: boolean;
 }
@@ -60,6 +66,7 @@ export interface MandateFacts {
   readonly max_in_flight: number;
   readonly allowed_categories: readonly string[];
   readonly allowed_destinations: readonly string[] | null;
+  readonly allowed_counterparties?: readonly string[] | null;
 }
 
 /**
@@ -142,10 +149,16 @@ const CHECKS: readonly (readonly [string, Check])[] = [
     mandate!.allowed_categories.includes(request.category)
       ? null
       : deny('CATEGORY_NOT_ALLOWED', `The mandate does not allow ${request.category} purchases.`, { dimension: 'allowed_categories' })],
-  ['destination', ({ mandate }, request) =>
-    mandate!.allowed_destinations === null || mandate!.allowed_destinations.includes(request.destination)
-      ? null
-      : deny('DESTINATION_NOT_ALLOWED', 'The mandate does not allow purchases for this destination.', { dimension: 'allowed_destinations' })],
+  ['destination', ({ mandate }, request) => {
+    if (mandate!.allowed_destinations !== null && !mandate!.allowed_destinations.includes(request.destination)) {
+      return deny('DESTINATION_NOT_ALLOWED', 'The mandate does not allow purchases for this destination.', { dimension: 'allowed_destinations' });
+    }
+    const counterparties = mandate!.allowed_counterparties ?? null;
+    if (counterparties !== null && (request.counterparty === undefined || !counterparties.includes(request.counterparty))) {
+      return deny('COUNTERPARTY_NOT_ALLOWED', 'The mandate does not allow paying this counterparty.', { dimension: 'allowed_counterparties' });
+    }
+    return null;
+  }],
   ['per_transaction', ({ mandate }, request, money) => {
     const limit = BigInt(mandate!.per_transaction_limit);
     return request.amount <= limit

@@ -84,7 +84,7 @@ export async function createAgentFixture(
       idempotencyKey: randomUUID(),
       correlationId: randomUUID(),
       availableAccountId: row.available_account_id,
-      assetCode: 'NGN',
+      assetCode: mandate.asset as 'NGN' | 'USDC',
       amountAtomic: options.funding!,
     });
   }

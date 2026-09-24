@@ -50,15 +50,19 @@ describe('ledger account taxonomy migration', () => {
           .selectFrom('ledger.accounts')
           .select(['account_class', 'purpose', 'asset_code', 'normal_balance'])
           .where('owner_type', '=', 'system')
+          .orderBy('asset_code')
           .orderBy('purpose')
           .execute();
 
-        expect(rows.map((row) => row.purpose)).toEqual([
-          'external_cash',
-          'meter_revenue',
-          'provider_payable',
-          'reserve',
-          'tax_liability',
+        // NGN from 0005; USDC cash and payable from 0012 for x402.
+        expect(rows.map((row) => `${row.asset_code} ${row.purpose}`)).toEqual([
+          'NGN external_cash',
+          'NGN meter_revenue',
+          'NGN provider_payable',
+          'NGN reserve',
+          'NGN tax_liability',
+          'USDC external_cash',
+          'USDC provider_payable',
         ]);
         expect(rows).toEqual([
           { account_class: 'asset', purpose: 'external_cash', asset_code: 'NGN', normal_balance: 'debit' },
@@ -76,6 +80,8 @@ describe('ledger account taxonomy migration', () => {
             asset_code: 'NGN',
             normal_balance: 'credit',
           },
+          { account_class: 'asset', purpose: 'external_cash', asset_code: 'USDC', normal_balance: 'debit' },
+          { account_class: 'provider_liability', purpose: 'provider_payable', asset_code: 'USDC', normal_balance: 'credit' },
         ]);
 
         await expect(insertAccount(db, { purpose: 'mystery' })).rejects.toMatchObject({ code: '23514' });
