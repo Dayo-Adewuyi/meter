@@ -2,12 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { fetchPaid } from './fetch-paid.ts';
 import type { ApiResponse, MeterApi } from './meter-api.ts';
 
 export interface ServerOptions {
   readonly pollIntervalMs?: number;
   readonly pollTimeoutMs?: number;
   readonly sleep?: (ms: number) => Promise<void>;
+  /** How paid resources are fetched; tests substitute a fake seller. */
+  readonly fetchResource?: typeof fetch;
 }
 
 interface ApiError {
@@ -137,6 +140,61 @@ export function createMeterMcpServer(api: MeterApi, options: ServerOptions = {})
       inputSchema: { limit: z.number().int().min(1).max(50).optional() },
     },
     async ({ limit }) => fromResponse(await api.listPurchases(limit ?? 10), (body) => body),
+  );
+
+  server.registerTool(
+    'fetch_paid',
+    {
+      description: [
+        'Fetch a web resource that may charge per request using the x402 protocol (HTTP 402), paying in USDC from the user\'s Meter balance within your mandate.',
+        'If the resource is free, you get the response. If it asks for payment, Meter checks your mandate and pays once, then the request is retried with proof of payment.',
+        'Never call fetch_paid again for the same request because the first one did not return what you wanted: if a payment was made, report its payment_id and use get_payment.',
+        'The user is only charged once the payment is final on-chain; if the seller never collects it, it is released automatically.',
+      ].join(' '),
+      inputSchema: {
+        url: z.string().describe('https URL of the resource (http://localhost is allowed for the sandbox).'),
+        method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
+        body: z.string().max(20_000).optional().describe('Request body, e.g. JSON text.'),
+        headers: z.record(z.string(), z.string()).optional().describe('Extra request headers. Authorization and cookies are never forwarded.'),
+        max_amount_usdc: z
+          .string()
+          .regex(/^\d+(\.\d{1,6})?$/)
+          .optional()
+          .describe('The most this one request may cost, in USDC, e.g. "0.25". Set it whenever the user named a budget.'),
+        intent: z.string().min(1).max(280).describe("Why you are fetching this, in the user's words where possible."),
+      },
+    },
+    async (input) => {
+      const outcome = await fetchPaid(api, input, options.fetchResource);
+      switch (outcome.kind) {
+        case 'refused':
+          return result({ refused: true, reason: outcome.reason }, true);
+        case 'declined':
+          return result({ declined: true, error: outcome.error, explanation: explain(outcome.error ?? { message: `HTTP ${outcome.status}` }) });
+        case 'response':
+          return result({ status: outcome.status, content_type: outcome.contentType, body: outcome.body, paid: false });
+        case 'paid':
+          return result({
+            status: outcome.status,
+            content_type: outcome.contentType,
+            body: outcome.body,
+            paid: `${outcome.amount} USDC`,
+            payment_id: outcome.paymentId,
+            note: outcome.accepted
+              ? 'Paid. The charge becomes final once the payment settles on-chain.'
+              : 'The seller did not accept the payment. Meter holds the funds until the authorization expires unused, then releases them. Do not retry; check get_payment later.',
+          });
+      }
+    },
+  );
+
+  server.registerTool(
+    'get_payment',
+    {
+      description: 'Status of one x402 payment: pending (signed, not yet final), settled (charged, with the on-chain transaction) or lapsed (never collected, released).',
+      inputSchema: { payment_id: z.string().uuid() },
+    },
+    async ({ payment_id }) => fromResponse(await api.getX402Payment(payment_id), (body) => body),
   );
 
   return server;
