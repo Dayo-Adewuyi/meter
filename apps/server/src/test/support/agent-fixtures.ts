@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
+import { expect } from 'vitest';
+import { SimulatedVasProvider } from '../../adapters/vas/simulated-vas-provider.ts';
+import type { VasProvider } from '../../adapters/vas/vas-provider.port.ts';
 import type { AgentPrincipal } from '../../modules/core/authorization/agent-principal.ts';
 import { AuthorizationService } from '../../modules/core/authorization/authorization.service.ts';
 import { type CreateMandateInput, MandatesService } from '../../modules/core/authorization/mandates.service.ts';
@@ -7,8 +10,9 @@ import { CreditDebitService } from '../../modules/core/ledger/credit-debit.servi
 import { ReservationService } from '../../modules/core/ledger/reservation.service.ts';
 import { type AgentsConfig, SANDBOX_AGENTS_CONFIG } from '../../modules/products/agents/agents.config.ts';
 import { type PurchaseRequest, purchaseRequestSchema } from '../../modules/products/agents/airtime-request.ts';
+import { FinalizerService } from '../../modules/products/agents/finalizer.service.ts';
 import { PurchasesService } from '../../modules/products/agents/purchases.service.ts';
-import type { DB } from '../../platform/database/types.ts';
+import type { DB, DeliveryStatus } from '../../platform/database/types.ts';
 
 export const TEST_PEPPER = 'test-pepper-test-pepper-test-pepper-0123';
 
@@ -115,4 +119,58 @@ export async function createAgentFixture(
       return BigInt(balance?.posted_amount ?? '0');
     },
   };
+}
+
+/** A finalizer on a fake clock, driving one fixture's purchases. */
+export class FinalizerHarness {
+  now = new Date();
+  readonly finalizer: FinalizerService;
+
+  constructor(
+    readonly db: Kysely<DB>,
+    readonly f: AgentFixture,
+    readonly provider: VasProvider = new SimulatedVasProvider({ latencyMs: 0, hangMs: 0 }),
+  ) {
+    this.finalizer = new FinalizerService(db, SANDBOX_AGENTS_CONFIG, provider, f.purchases);
+    this.finalizer.clock = () => this.now;
+  }
+
+  get simulator(): SimulatedVasProvider {
+    return this.provider as SimulatedVasProvider;
+  }
+
+  async buy(lastFour: string, amount = '500'): Promise<string> {
+    const result = await this.f.purchases.create(this.f.agent, crypto.randomUUID(), airtime({ amount, destination: `0803000${lastFour}` }));
+    expect(result.httpStatus).toBe(202);
+    // The fake clock never runs behind the real one the purchase was stamped with.
+    this.now = new Date(Math.max(this.now.getTime(), Date.now()));
+    return result.body.purchase_id as string;
+  }
+
+  async status(id: string): Promise<DeliveryStatus> {
+    return (await this.db.selectFrom('agents.purchases').select('delivery_status').where('id', '=', id).executeTakeFirstOrThrow()).delivery_status;
+  }
+
+  advance(ms: number): void {
+    this.now = new Date(this.now.getTime() + ms);
+  }
+
+  /** Tick, advancing a second at a time, until the purchase leaves the active statuses. */
+  async settle(id: string, maxSeconds = 120): Promise<DeliveryStatus> {
+    for (let s = 0; s < maxSeconds; s++) {
+      await this.finalizer.tick();
+      const status = await this.status(id);
+      if (!['pending_dispatch', 'dispatching', 'awaiting_confirmation'].includes(status)) return status;
+      this.advance(1_000);
+    }
+    return this.status(id);
+  }
+
+  ledger() {
+    return Promise.all([this.f.balance(this.f.availableAccountId), this.f.balance(this.f.reservedAccountId)]);
+  }
+}
+
+export async function harness(db: Kysely<DB>, provider?: VasProvider) {
+  return new FinalizerHarness(db, await createAgentFixture(db, { funding: 1_000_000n }), provider);
 }
