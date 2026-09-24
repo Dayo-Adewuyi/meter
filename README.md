@@ -80,6 +80,20 @@ Register the MCP server in Claude Desktop's config:
 }
 ```
 
+The owner web app (`apps/web`) is where people use this: draw a covenant (a
+mandate) with a live parchment preview, watch its limits fill as rose windows,
+forge a seal (credential) and break it to read the token once, dissolve a
+covenant, and read the chronicle of any purchase. With no
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` it runs entirely on demo data, so it can be
+previewed without a backend or a login:
+
+```bash
+pnpm --filter @meter/web dev   # http://localhost:3000, demo data
+```
+
+With a key it signs in through Clerk and calls the API at
+`NEXT_PUBLIC_METER_API_URL`; set `WEB_ORIGIN` on the server so the browser may call it.
+
 Tools: `get_spending_power`, `buy_airtime`, `get_purchase`, `list_purchases`.
 The MCP process holds one agent credential and calls only the public agent API:
 it has no database access and no route to owner or operator endpoints.
@@ -113,7 +127,7 @@ measured exit gate in PRD §9.
 | `apps/server/src/modules/products` | Verticals. One per stage, as they are gated in. |
 | `apps/server/src/adapters` | External providers behind Meter-owned interfaces. |
 | `apps/server/src/platform` | Database, jobs, telemetry, security. |
-| `apps/web` | Static Next.js PWA. No financial logic, no direct database access. |
+| `apps/web` | Static Next.js owner app for mandates. No financial logic, no direct database access. |
 | `apps/mcp` | Stdio MCP server for agents. A pure HTTP client of the agent API. |
 | `packages/contracts` | Browser-safe schemas, incl. the canonical transaction model. |
 | `packages/config` | Typed environment, validated at boot. |
