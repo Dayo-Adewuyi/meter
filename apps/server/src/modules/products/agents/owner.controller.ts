@@ -10,6 +10,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import { ASSETS, decimalString, fromAtomic, toAtomic } from '@meter/contracts';
@@ -90,6 +91,11 @@ const resolveSchema = z
   })
   .strict();
 
+const listQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  before: z.uuid().optional(),
+});
+
 const owner = (request: FastifyRequest): MeterPrincipal => request.principal!;
 
 /** Owner routes (§8.1): a Clerk session, via the global `AuthGuard`. */
@@ -129,6 +135,29 @@ export class OwnerController {
   @Get('mandates/:id')
   get(@Req() request: FastifyRequest, @Param('id', new ParseUUIDPipe()) id: string) {
     return this.mandates.get(owner(request).userId, id);
+  }
+
+  @Get('mandates/:id/purchases')
+  purchasesForMandate(@Req() request: FastifyRequest, @Param('id', new ParseUUIDPipe()) id: string, @Query() query: unknown) {
+    const { limit, before } = parse(listQuery, query);
+    return this.purchases.listForMandate(owner(request).userId, id, limit, before);
+  }
+
+  /** The owner's NGN balance: what agents can draw on, and what is held for purchases in flight. */
+  @Get('balance')
+  async balance(@Req() request: FastifyRequest) {
+    const userId = owner(request).userId;
+    const rows = await this.db
+      .selectFrom('ledger.accounts as a')
+      .leftJoin('ledger.balances as b', 'b.account_id', 'a.id')
+      .select(['a.purpose', 'b.posted_amount'])
+      .where('a.owner_type', '=', 'customer')
+      .where('a.owner_id', '=', userId)
+      .where('a.asset_code', '=', 'NGN')
+      .execute();
+    const amount = (purpose: string) =>
+      fromAtomic(BigInt(rows.find((row) => row.purpose === purpose)?.posted_amount ?? '0'), ASSETS.NGN);
+    return { asset: 'NGN', available: amount('customer_available'), reserved: amount('customer_reserved') };
   }
 
   @Post('mandates/:id/revoke')

@@ -13,6 +13,16 @@ export interface Timeline {
   readonly purchase_id: string;
   readonly owner_id: string;
   readonly correlation_id: string;
+  readonly purchase: {
+    readonly amount: string;
+    readonly asset: string;
+    readonly network: string;
+    readonly destination: string;
+    readonly intent: string;
+    readonly delivery_status: string;
+    readonly credential_label: string;
+    readonly created_at: string;
+  };
   readonly entries: readonly TimelineEntry[];
 }
 
@@ -32,7 +42,7 @@ export async function buildTimeline(db: Kysely<DB>, purchaseId: string): Promise
     .selectFrom('agents.purchases as p')
     .innerJoin('authz.agent_credentials as c', 'c.id', 'p.credential_id')
     .innerJoin('authz.mandates as m', 'm.id', 'c.mandate_id')
-    .select(['p.id', 'p.decision_id', 'p.correlation_id', 'p.intent', 'p.asset_code', 'p.amount', 'p.network', 'p.destination', 'c.public_id', 'm.owner_id'])
+    .select(['p.id', 'p.decision_id', 'p.correlation_id', 'p.intent', 'p.asset_code', 'p.amount', 'p.network', 'p.destination', 'p.delivery_status', 'p.created_at', 'c.public_id', 'c.label', 'm.owner_id'])
     .where('p.id', '=', purchaseId)
     .executeTakeFirst();
   if (purchase === undefined) return null;
@@ -96,7 +106,22 @@ export async function buildTimeline(db: Kysely<DB>, purchaseId: string): Promise
     }
   }
 
-  return { purchase_id: purchase.id, owner_id: purchase.owner_id, correlation_id: purchase.correlation_id, entries };
+  return {
+    purchase_id: purchase.id,
+    owner_id: purchase.owner_id,
+    correlation_id: purchase.correlation_id,
+    purchase: {
+      amount: fromAtomic(BigInt(purchase.amount), asset),
+      asset: purchase.asset_code,
+      network: purchase.network,
+      destination: `${purchase.destination.slice(0, 7)}····${purchase.destination.slice(-3)}`,
+      intent: purchase.intent,
+      delivery_status: purchase.delivery_status,
+      credential_label: purchase.label,
+      created_at: purchase.created_at.toISOString(),
+    },
+    entries,
+  };
 }
 
 export function renderTimeline(timeline: Timeline): string {

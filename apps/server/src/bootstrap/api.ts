@@ -16,5 +16,15 @@ const app = await NestFactory.create<NestFastifyApplication>(
 );
 
 app.setGlobalPrefix('v1');
+if (env.WEB_ORIGIN !== undefined) {
+  // The web app is a separate static origin (§6.1); bearer tokens, never cookies.
+  app.enableCors({
+    origin: env.WEB_ORIGIN,
+    credentials: false,
+    allowedHeaders: ['authorization', 'content-type', 'idempotency-key'],
+    exposedHeaders: ['idempotent-replayed'],
+    maxAge: 600,
+  });
+}
 await app.listen({ port: env.PORT, host: '0.0.0.0' });
 logger.info({ port: env.PORT }, 'meter api listening');

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Every mark stays inside the maskable safe zone (r = 205 about the centre). -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="46%" r="55%">
+      <stop offset="0" stop-color="#e7a25a" stop-opacity="0.22"/>
+      <stop offset="0.55" stop-color="#c8a15a" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#0b0a09" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gilt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e4c37f"/>
+      <stop offset="1" stop-color="#b08a45"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#0b0a09"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <!-- The arch: a lancet window with its sill. -->
+  <path d="M160 412 V244 Q160 154 256 106 Q352 154 352 244 V412" fill="none" stroke="url(#gilt)" stroke-width="14" stroke-linejoin="miter"/>
+  <path d="M182 412 V250 Q182 174 256 134 Q330 174 330 250 V412" fill="none" stroke="#c8a15a" stroke-opacity="0.45" stroke-width="4"/>
+  <!-- Solid: a gradient on a zero-height bounding box paints nothing. -->
+  <path d="M148 412 H364" stroke="#b89250" stroke-width="14"/>
+  <!-- The quatrefoil from the wordmark. -->
+  <g fill="none" stroke="url(#gilt)" stroke-width="10">
+    <circle cx="256" cy="246" r="30"/>
+    <circle cx="290" cy="280" r="30"/>
+    <circle cx="256" cy="314" r="30"/>
+    <circle cx="222" cy="280" r="30"/>
+  </g>
+  <path d="M256 262 L274 280 L256 298 L238 280 Z" fill="#e4c37f"/>
+</svg>

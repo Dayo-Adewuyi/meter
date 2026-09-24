@@ -227,6 +227,26 @@ export class PurchasesService {
     };
   }
 
+  /** Owner view of a mandate's purchases, newest first. Another owner's mandate reads as empty. */
+  async listForMandate(ownerId: string, mandateId: string, limit: number, before?: string) {
+    let query = this.db
+      .selectFrom('agents.purchases as p')
+      .innerJoin('authz.agent_credentials as c', 'c.id', 'p.credential_id')
+      .innerJoin('authz.mandates as m', 'm.id', 'c.mandate_id')
+      .selectAll('p')
+      .select('c.label as credential_label')
+      .where('m.id', '=', mandateId)
+      .where('m.owner_id', '=', ownerId)
+      .orderBy('p.id', 'desc')
+      .limit(limit);
+    if (before !== undefined) query = query.where('p.id', '<', before);
+    const rows = await query.execute();
+    return {
+      purchases: rows.map((row) => ({ ...present(row), credential_label: row.credential_label })),
+      next_cursor: rows.length === limit ? rows.at(-1)!.id : null,
+    };
+  }
+
   /**
    * Pre-dispatch expiry (§5.5): purchase → expired, hold → expired, ledger
    * release, in the caller's transaction. Anything already dispatching is left
