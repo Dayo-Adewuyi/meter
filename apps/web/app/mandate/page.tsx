@@ -12,17 +12,17 @@ import { useToast } from '@/components/Shell';
 import { Status } from '@/components/Status';
 import { WaxSeal } from '@/components/WaxSeal';
 import { ArrowLeft, Chevron, Quatrefoil, Seal } from '@/components/icons';
-import { dayMonth, longDate, maskPhone, naira, ratio, relative, roman, span } from '@/lib/format';
+import { dayMonth, longDate, maskPhone, money, naira, ratio, relative, roman, roseFigure, shortAddress, span } from '@/lib/format';
 import { useMeter, useResource } from '@/lib/meter';
 import { ApiError, type Credential, type IssuedCredential, type Mandate } from '@/lib/types';
 
 const API_URL = process.env.NEXT_PUBLIC_METER_API_URL ?? 'http://localhost:3001';
 
 function Articles({ m }: { m: Mandate }) {
-  const items: [string, string][] = [
-    ['The single deed', `No purchase greater than ${naira(m.limits.per_transaction)}.`],
-    ['The day', `No more than ${naira(m.limits.daily)} between one Lagos midnight and the next.`],
-    ['The whole', `No more than ${naira(m.limits.lifetime)} for the life of the covenant.`],
+  const items = [
+    ['The single deed', `No purchase greater than ${money(m.limits.per_transaction, m.asset)}.`],
+    ['The day', `No more than ${money(m.limits.daily, m.asset)} between one Lagos midnight and the next.`],
+    ['The whole', `No more than ${money(m.limits.lifetime, m.asset)} for the life of the covenant.`],
     ['The pace', `At most ${m.limits.velocity.max_count} deeds in ${span(m.limits.velocity.window_secs)}; never more than ${m.limits.max_in_flight} in passage at once.`],
     [
       'The repetition',
@@ -30,17 +30,24 @@ function Articles({ m }: { m: Mandate }) {
         ? 'Identical deeds are allowed back to back.'
         : `The same number and amount twice within ${span(m.limits.duplicate_window_secs)} is refused, unless the user asks for it again.`,
     ],
-    [
-      'The reach',
-      `${m.limits.allowed_categories.join(', ').replace(/^./, (c) => c.toUpperCase())} only, ${
-        m.limits.allowed_destinations === null ? 'to any Nigerian mobile number' : `to ${m.limits.allowed_destinations.map(maskPhone).join(', ')} alone`
-      }.`,
-    ],
+    m.limits.allowed_categories.includes('x402')
+      ? [
+          'The reach',
+          `Paid web resources (x402), settled in USDC on Base Sepolia, ${
+            m.limits.allowed_destinations === null ? 'from any origin' : `from ${m.limits.allowed_destinations.join(', ')} alone`
+          }${m.limits.allowed_counterparties == null ? '' : `, paid only to ${m.limits.allowed_counterparties.map(shortAddress).join(', ')}`}. Nothing is charged until the chain has made the payment final.`,
+        ]
+      : [
+          'The reach',
+          `${m.limits.allowed_categories.join(', ').replace(/^./, (c) => c.toUpperCase())} only, ${
+            m.limits.allowed_destinations === null ? 'to any Nigerian mobile number' : `to ${m.limits.allowed_destinations.map(maskPhone).join(', ')} alone`
+          }.`,
+        ],
     ['The term', m.status === 'active' ? `In force until ${longDate(m.expires_at)}.` : `Dissolved ${longDate(m.revoked_at ?? m.expires_at)}.`],
   ];
   return (
     <ol className="articles">
-      {items.map(([title, body], i) => (
+      {(items as [string, string][]).map(([title, body], i) => (
         <li key={title}>
           <span className="articles__numeral" aria-hidden="true">
             {roman(i + 1)}
@@ -227,6 +234,65 @@ function Deeds({ mandateId }: { mandateId: string }) {
   );
 }
 
+function X402Ledger({ mandateId }: { mandateId: string }) {
+  const payments = useResource(`x402:${mandateId}`, (c) => c.x402Payments(mandateId));
+  return (
+    <section aria-labelledby="x402-title">
+      <h2 id="x402-title" className="display display--section">
+        The ledger of <span className="gilt">tolls</span>
+      </h2>
+      <p className="muted" style={{ margin: '8px 0 24px' }}>
+        Each toll is a signed promise to pay one web resource. It is charged only when the chain shows it spent, and returned if it expires unspent.
+      </p>
+      {payments.data === undefined ? (
+        <div className="skeleton" style={{ height: 240 }} aria-label="Loading payments" />
+      ) : payments.data.length === 0 ? (
+        <p className="empty">No toll has been paid under this covenant.</p>
+      ) : (
+        <table className="deeds">
+          <thead>
+            <tr>
+              <th scope="col">Resource</th>
+              <th scope="col">Status</th>
+              <th scope="col" className="num">
+                Amount
+              </th>
+              <th scope="col">
+                <span className="sr-only">Chronicle</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {payments.data.map((p) => (
+              <tr key={p.payment_id}>
+                <td>
+                  <span className="figure">
+                    {p.method} /{new URL(p.resource_url).pathname.split('/').filter(Boolean).pop() ?? ''}
+                  </span>
+                  <span className="deeds__intent">“{p.intent}”</span>
+                  <span className="muted" style={{ fontSize: '0.9rem' }}>
+                    {new URL(p.resource_url).host} · {relative(p.created_at)}
+                    {p.credential_label === undefined ? '' : ` · by ${p.credential_label}`}
+                  </span>
+                </td>
+                <td>
+                  <Status status={p.status} />
+                </td>
+                <td className="num figure">{money(p.amount, p.asset)}</td>
+                <td>
+                  <Link href={`/purchase?id=${p.payment_id}&kind=x402`} aria-label={`Chronicle of the ${money(p.amount, p.asset)} toll`} transitionTypes={FORWARD} data-cursor="Read">
+                    Chronicle <Chevron size={14} />
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
 function CovenantPage() {
   const params = useSearchParams();
   const id = params.get('id');
@@ -282,12 +348,11 @@ function CovenantPage() {
         <div className="clerestory__bay">
           <RoseWindow
             used={today}
-            value={naira(m.exposure.daily_remaining).replace(/\.00$/, '')}
-            label="left today"
-            description={`${naira(m.exposure.today)} of ${naira(m.limits.daily)} used today; ${naira(m.exposure.daily_remaining)} remains.`}
+            {...roseFigure(m.exposure.daily_remaining, m.asset, 'left today')}
+            description={`${money(m.exposure.today, m.asset)} of ${money(m.limits.daily, m.asset)} used today; ${money(m.exposure.daily_remaining, m.asset)} remains.`}
           />
           <p>
-            <span className="figure">{naira(m.exposure.today)}</span> <span className="muted">of {naira(m.limits.daily)} today</span>
+            <span className="figure">{money(m.exposure.today, m.asset)}</span> <span className="muted">of {money(m.limits.daily, m.asset)} today</span>
             <br />
             <span className="muted">renews {relative(m.exposure.daily_resets_at)}</span>
           </p>
@@ -295,12 +360,11 @@ function CovenantPage() {
         <div className="clerestory__bay">
           <RoseWindow
             used={lifetime}
-            value={naira(m.exposure.lifetime_remaining).replace(/\.00$/, '')}
-            label="left in all"
-            description={`${naira(m.exposure.lifetime)} of ${naira(m.limits.lifetime)} used over the covenant's life.`}
+            {...roseFigure(m.exposure.lifetime_remaining, m.asset, 'left in all')}
+            description={`${money(m.exposure.lifetime, m.asset)} of ${money(m.limits.lifetime, m.asset)} used over the covenant's life.`}
           />
           <p>
-            <span className="figure">{naira(m.exposure.lifetime)}</span> <span className="muted">of {naira(m.limits.lifetime)} in all</span>
+            <span className="figure">{money(m.exposure.lifetime, m.asset)}</span> <span className="muted">of {money(m.limits.lifetime, m.asset)} in all</span>
           </p>
         </div>
         <div className="clerestory__bay">
@@ -336,7 +400,7 @@ function CovenantPage() {
           <Seals m={m} onChange={mandate.reload} />
         </Reveal>
         <Reveal i={1}>
-          <Deeds mandateId={m.id} />
+          {m.limits.allowed_categories.includes('x402') ? <X402Ledger mandateId={m.id} /> : <Deeds mandateId={m.id} />}
         </Reveal>
       </div>
 

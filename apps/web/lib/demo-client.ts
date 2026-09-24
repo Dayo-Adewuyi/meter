@@ -1,4 +1,4 @@
-import { ApiError, type Balance, type CreateMandateInput, type Credential, type Mandate, type MeterClient, type Purchase, type Timeline, type TimelineEntry } from './types';
+import { ApiError, type Balance, type CreateMandateInput, type Credential, type Mandate, type MeterClient, type Purchase, type Timeline, type TimelineEntry, type X402Payment } from './types';
 
 /**
  * In-memory stand-in for the owner API, used when no Clerk key is configured:
@@ -125,6 +125,80 @@ function timelineFor({ purchase: p, shape, declineCode }: Scenario): Timeline {
   return { purchase_id: p.purchase_id, correlation_id: id(), purchase: summary, entries };
 }
 
+interface X402Scenario {
+  readonly payment: X402Payment;
+  readonly timeline: Timeline;
+}
+
+const hex = (label: string) => `0x${Array.from(label).map((c) => c.charCodeAt(0).toString(16)).join('').padEnd(64, 'a').slice(0, 64)}`;
+
+function x402Scenario(minutesAgo: number, amount: string, question: string, status: X402Payment['status'], label: string): X402Scenario {
+  const created = new Date(Date.now() - minutesAgo * MIN);
+  const at = (ms: number) => new Date(created.getTime() + ms).toISOString();
+  const payTo = '0x7a3be5c7c1d0b0e0f0a0b0c0d0e0f00112233445';
+  const settlement = status === 'settled' ? hex(`tx${question}`) : null;
+  const payment: X402Payment = {
+    payment_id: id(),
+    status,
+    state: status === 'pending' ? 'signed' : status,
+    amount,
+    asset: 'USDC',
+    network: 'eip155:84532',
+    pay_to: payTo,
+    resource_url: `http://localhost:3001/v1/sandbox/x402/oracle?q=${encodeURIComponent(question)}`,
+    method: 'GET',
+    intent: question,
+    valid_before: at(120_000),
+    settlement_tx: settlement,
+    credential_label: label,
+    created_at: created.toISOString(),
+  };
+  const checks = ['credential', 'scope', 'mandate', 'owner', 'category', 'destination', 'per_transaction', 'duplicate', 'velocity', 'concurrency', 'daily', 'lifetime', 'funds'];
+  const entries: TimelineEntry[] = [];
+  const move = (ms: number, from: string, to: string, actor: string, reason: string) => entries.push({ at: at(ms), kind: 'purchase', summary: `${from} → ${to}`, detail: { from, to, actor, reason } });
+  const ledger = (ms: number, type: string, moveText: string) => entries.push({ at: at(ms), kind: 'ledger', summary: type, detail: { type, amount, move: moveText } });
+  if (status === 'declined') {
+    const fail = checks.indexOf('destination');
+    entries.push({ at: at(0), kind: 'decision', summary: 'declined', detail: { outcome: 'declined', reason_code: 'DESTINATION_NOT_ALLOWED', checks: checks.slice(0, fail + 1).map((c, i) => `${c} ${i === fail ? '✗' : '✓'}`).join(' ') } });
+    move(3, '∅', 'declined', `agent:${label}`, 'DESTINATION_NOT_ALLOWED');
+  } else {
+    entries.push({ at: at(0), kind: 'decision', summary: 'approved', detail: { outcome: 'approved', reason_code: null, checks: checks.map((c) => `${c} ✓`).join(' ') } });
+    ledger(5, 'reserve', 'available → reserved');
+    move(5, '∅', 'signed', `agent:${label}`, 'authorized');
+    if (status === 'settled') {
+      entries.push({ at: at(900), kind: 'provider', summary: 'hint', detail: { call: 'hint', kind: 'reported' } });
+      entries.push({ at: at(6_400), kind: 'provider', summary: 'AuthorizationUsed at block 4', detail: { call: 'chain', kind: 'used', provider_reference: settlement } });
+      ledger(6_420, 'capture', 'reserved → provider_payable');
+      move(6_420, 'signed', 'settled', 'worker', 'authorization_used_at_safe_head');
+    }
+    if (status === 'lapsed') {
+      entries.push({ at: at(126_000), kind: 'provider', summary: 'expired unused', detail: { call: 'chain', kind: 'expired unused' } });
+      ledger(126_020, 'release', 'reserved → available');
+      move(126_020, 'signed', 'lapsed', 'worker', 'expired_unused_at_safe_head');
+    }
+  }
+  const timeline: Timeline = {
+    purchase_id: payment.payment_id,
+    correlation_id: id(),
+    purchase: {
+      amount,
+      asset: 'USDC',
+      network: payment.network,
+      destination: payment.resource_url,
+      intent: question,
+      delivery_status: payment.state,
+      credential_label: label,
+      created_at: payment.created_at,
+      pay_to: payTo,
+      nonce: status === 'declined' ? null : hex(`nonce${question}`),
+      valid_before: status === 'declined' ? null : payment.valid_before,
+      settlement_tx: settlement,
+    },
+    entries,
+  };
+  return { payment, timeline };
+}
+
 function seed() {
   seeding = true;
   seq = 0;
@@ -183,23 +257,57 @@ function seedFixtures() {
       credentials: [credential('Intern', 'revoked', 3 * 1440 + 30, 40)],
     },
   ];
+  const oracleSeal = credential('Claude Desktop (x402)', 'active', 1, 1);
+  const oracle: Mandate = {
+    ...base,
+    id: id(),
+    name: 'Oracle budget',
+    asset: 'USDC',
+    status: 'active',
+    created_at: ago(1440 * MIN),
+    limits: { per_transaction: '0.500000', daily: '5.000000', lifetime: '50.000000', velocity: { max_count: 20, window_secs: 600 }, max_in_flight: 3, duplicate_window_secs: 120, allowed_categories: ['x402'], allowed_destinations: ['http://localhost:3001'], allowed_counterparties: null },
+    exposure: { today: '0.200000', lifetime: '0.300000', daily_remaining: '4.800000', lifetime_remaining: '49.700000', in_flight: 1, daily_resets_at: reset },
+    credentials: [oracleSeal],
+  };
+  mandates.push(oracle);
+  const x402 = new Map<string, X402Scenario[]>([
+    [
+      oracle.id,
+      [
+        x402Scenario(1, '0.100000', 'Will it rain in Lagos tonight?', 'pending', 'Claude Desktop (x402)'),
+        x402Scenario(9, '0.100000', 'What does the chain say about Friday?', 'settled', 'Claude Desktop (x402)'),
+        x402Scenario(44, '0.100000', 'Should I trust a seller who never settles?', 'lapsed', 'Claude Desktop (x402)'),
+        x402Scenario(80, '0.100000', 'Ask the oracle on evil.example', 'declined', 'Claude Desktop (x402)'),
+        x402Scenario(1440 + 20, '0.100000', 'First question to the oracle', 'settled', 'Claude Desktop (x402)'),
+      ],
+    ],
+  ]);
   const scenarios = new Map<string, Scenario[]>([
     [mandates[0]!.id, scenariosA],
     [mandates[1]!.id, scenariosB],
     [mandates[2]!.id, []],
   ]);
-  return { balance: { asset: 'NGN', available: '14250.00', reserved: '500.00' } as Balance, mandates, scenarios };
+  const balance: Balance = {
+    asset: 'NGN',
+    available: '14250.00',
+    reserved: '500.00',
+    balances: [
+      { asset: 'NGN', available: '14250.00', reserved: '500.00' },
+      { asset: 'USDC', available: '24.600000', reserved: '0.100000' },
+    ],
+  };
+  return { balance, mandates, scenarios, x402 };
 }
 
-const STORE = 'meter:demo:v1';
+const STORE = 'meter:demo:v2';
 type State = ReturnType<typeof seed>;
 
 function restore(): State {
   try {
     const saved = sessionStorage.getItem(STORE);
     if (saved !== null) {
-      const parsed = JSON.parse(saved) as Omit<State, 'scenarios'> & { scenarios: [string, Scenario[]][] };
-      return { ...parsed, scenarios: new Map(parsed.scenarios) };
+      const parsed = JSON.parse(saved) as Omit<State, 'scenarios' | 'x402'> & { scenarios: [string, Scenario[]][]; x402: [string, X402Scenario[]][] };
+      return { ...parsed, scenarios: new Map(parsed.scenarios), x402: new Map(parsed.x402) };
     }
   } catch {
     // Private mode or corrupt state: start from the fixtures.
@@ -211,7 +319,7 @@ export function demoClient(): MeterClient {
   const state = restore();
   const save = () => {
     try {
-      sessionStorage.setItem(STORE, JSON.stringify({ ...state, scenarios: [...state.scenarios] }));
+      sessionStorage.setItem(STORE, JSON.stringify({ ...state, scenarios: [...state.scenarios], x402: [...state.x402] }));
     } catch {
       // Demo changes then last for this page only.
     }
@@ -251,7 +359,7 @@ export function demoClient(): MeterClient {
       const mandate: Mandate = {
         id: id(),
         name: input.name,
-        asset: 'NGN',
+        asset: input.asset,
         status: 'active',
         expires_at: input.expires_at,
         revoked_at: null,
@@ -265,12 +373,14 @@ export function demoClient(): MeterClient {
           duplicate_window_secs: input.duplicate_window_secs,
           allowed_categories: input.allowed_categories,
           allowed_destinations: input.allowed_destinations,
+          allowed_counterparties: input.allowed_counterparties ?? null,
         },
         exposure: { today: '0.00', lifetime: '0.00', daily_remaining: input.daily_limit, lifetime_remaining: input.lifetime_limit, in_flight: 0, daily_resets_at: ahead(9 * 60 * MIN) },
         credentials: [],
       };
       state.mandates = [mandate, ...state.mandates];
       state.scenarios.set(mandate.id, []);
+      state.x402.set(mandate.id, []);
       save();
       return mandate;
     },
@@ -312,6 +422,18 @@ export function demoClient(): MeterClient {
         if (scenario !== undefined) return timelineFor(scenario);
       }
       throw new ApiError('PURCHASE_NOT_FOUND', 'No such deed.');
+    },
+    async x402Payments(mandateId) {
+      await pause();
+      return (state.x402.get(mandateId) ?? []).map((x) => x.payment);
+    },
+    async x402Timeline(paymentId) {
+      await pause();
+      for (const list of state.x402.values()) {
+        const found = list.find((x) => x.payment.payment_id === paymentId);
+        if (found !== undefined) return found.timeline;
+      }
+      throw new ApiError('PAYMENT_NOT_FOUND', 'No such payment.');
     },
   };
 }

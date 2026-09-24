@@ -8,7 +8,7 @@ import { BACK, PageTransition } from '@/components/PageTransition';
 import { Reveal } from '@/components/Reveal';
 import { Status } from '@/components/Status';
 import { ArrowLeft, Bell, Check, Coin, Cross, Scroll, Seal } from '@/components/icons';
-import { clock, longDate, naira } from '@/lib/format';
+import { clock, longDate, money, shortAddress } from '@/lib/format';
 import { useResource } from '@/lib/meter';
 import type { TimelineEntry } from '@/lib/types';
 
@@ -17,6 +17,10 @@ const STATUS: Record<string, string> = {
   rejected: 'failed',
   declined: 'declined',
   expired: 'expired',
+  signed: 'pending',
+  settled: 'settled',
+  lapsed: 'lapsed',
+  unresolved: 'pending',
 };
 
 const KIND = {
@@ -52,7 +56,7 @@ function Checks({ checks }: { checks: string }) {
   );
 }
 
-function Entry({ entry, i }: { entry: TimelineEntry; i: number }) {
+function Entry({ entry, i, asset }: { entry: TimelineEntry; i: number; asset: string }) {
   const { label, Icon } = KIND[entry.kind];
   const d = entry.detail;
   let text: React.ReactNode;
@@ -70,11 +74,29 @@ function Entry({ entry, i }: { entry: TimelineEntry; i: number }) {
     case 'ledger':
       text = (
         <>
-          <span className="figure">{naira(String(d.amount))}</span> {LEDGER[String(d.type)] ?? words(d.type)}
+          <span className="figure">{money(String(d.amount), asset)}</span> {LEDGER[String(d.type)] ?? words(d.type)}
         </>
       );
       break;
     case 'provider':
+      if (d.call === 'hint') {
+        text = <>The agent reported the seller was paid. <span className="muted">A hint only; the chain decides.</span></>;
+        break;
+      }
+      if (d.call === 'chain') {
+        text =
+          d.kind === 'used' ? (
+            <>
+              The chain shows the authorization <strong>spent</strong>, final at the safe head
+              {d.provider_reference === undefined || d.provider_reference === null ? null : <span className="mono muted"> · {shortAddress(String(d.provider_reference))}</span>}
+            </>
+          ) : (
+            <>
+              The authorization <strong>expired unspent</strong> at the safe head. <span className="muted">It can never be used now, so the hold is safe to return.</span>
+            </>
+          );
+        break;
+      }
       text = (
         <>
           {d.call === 'send' ? 'Sent to the provider' : 'Asked the provider again'}
@@ -116,8 +138,10 @@ function Entry({ entry, i }: { entry: TimelineEntry; i: number }) {
 }
 
 function Chronicle() {
-  const id = useSearchParams().get('id');
-  const timeline = useResource(id === null ? null : `timeline:${id}`, (c) => c.timeline(id!));
+  const params = useSearchParams();
+  const id = params.get('id');
+  const x402 = params.get('kind') === 'x402';
+  const timeline = useResource(id === null ? null : `timeline:${x402 ? 'x402:' : ''}${id}`, (c) => (x402 ? c.x402Timeline(id!) : c.timeline(id!)));
   if (id === null) return <p className="empty">No deed was named.</p>;
   if (timeline.error !== undefined) {
     return (
@@ -149,14 +173,42 @@ function Chronicle() {
       <dl className="facts">
         <div>
           <dt>Sum</dt>
-          <dd className="figure">{naira(p.amount)}</dd>
+          <dd className="figure">{money(p.amount, p.asset)}</dd>
         </div>
-        <div>
-          <dt>Airtime for</dt>
-          <dd className="figure">
-            {p.network.toUpperCase()} · {p.destination}
-          </dd>
-        </div>
+        {x402 ? (
+          <>
+            <div>
+              <dt>Resource</dt>
+              <dd className="mono" style={{ overflowWrap: 'anywhere', fontSize: '0.95rem' }}>
+                {(() => {
+                  const url = new URL(p.destination);
+                  return `${url.host}${url.pathname}`;
+                })()}
+              </dd>
+            </div>
+            <div>
+              <dt>Paid to</dt>
+              <dd className="mono">{p.pay_to === undefined ? '—' : shortAddress(p.pay_to)}</dd>
+            </div>
+            <div>
+              <dt>Valid until</dt>
+              <dd>{p.valid_before == null ? '—' : clock(p.valid_before).slice(0, 8)}</dd>
+            </div>
+            {p.settlement_tx == null ? null : (
+              <div>
+                <dt>Settled in</dt>
+                <dd className="mono">{shortAddress(p.settlement_tx)}</dd>
+              </div>
+            )}
+          </>
+        ) : (
+          <div>
+            <dt>Airtime for</dt>
+            <dd className="figure">
+              {p.network.toUpperCase()} · {p.destination}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Borne by</dt>
           <dd>{p.credential_label}</dd>
@@ -171,7 +223,7 @@ function Chronicle() {
         </h2>
         <ol className="chronicle">
           {t.entries.map((entry, i) => (
-            <Entry key={`${entry.at}-${i}`} entry={entry} i={i} />
+            <Entry key={`${entry.at}-${i}`} entry={entry} i={i} asset={p.asset} />
           ))}
         </ol>
       </section>

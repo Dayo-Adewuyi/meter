@@ -812,10 +812,12 @@ main {
   flex: none;
 }
 .status--active,
-.status--delivered {
+.status--delivered,
+.status--settled {
   color: var(--verdigris);
 }
-.status--processing {
+.status--processing,
+.status--pending {
   color: var(--ember);
 }
 .status--failed,
@@ -823,10 +825,12 @@ main {
 .status--revoked {
   color: var(--blood-hi);
 }
-.status--expired {
+.status--expired,
+.status--lapsed {
   color: var(--ash);
 }
-.status--processing svg {
+.status--processing svg,
+.status--pending svg {
   animation: spin 2.4s linear infinite;
 }
 
@@ -1186,6 +1190,7 @@ main {
 }
 .deeds .num {
   text-align: right;
+  white-space: nowrap;
 }
 .deeds__intent {
   display: block;

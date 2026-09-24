@@ -5,7 +5,7 @@ import { type FormEvent, useMemo, useState } from 'react';
 import { Inscribe } from '@/components/Inscribe';
 import { FORWARD, PageTransition } from '@/components/PageTransition';
 import { Seal, Warning } from '@/components/icons';
-import { compareAmounts, longDate, naira, span } from '@/lib/format';
+import { compareAmounts, longDate, money, span } from '@/lib/format';
 import { useMeter } from '@/lib/meter';
 import { ApiError } from '@/lib/types';
 
@@ -24,10 +24,30 @@ const DUPLICATE_WINDOWS = [
 ] as const;
 
 const inThirtyDays = () => new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
-const AMOUNT = /^\d{1,9}(\.\d{1,2})?$/;
+const AMOUNTS = { airtime: /^\d{1,9}(\.\d{1,2})?$/, x402: /^\d{1,9}(\.\d{1,6})?$/ };
 const PHONE = /^(?:\+?234|0)[789][01]\d{8}$/;
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+type Kind = 'airtime' | 'x402';
+
+/** The same covenant, spelled per trade: NGN airtime or USDC web tolls. */
+const KINDS = {
+  airtime: { asset: 'NGN' as const, label: 'Airtime', prefix: '₦', suffix: undefined, defaults: { perDeed: '2000', perDay: '5000', inAll: '50000', destinations: '' } },
+  x402: { asset: 'USDC' as const, label: 'Paid web resources (x402)', prefix: undefined, suffix: 'USDC', defaults: { perDeed: '0.50', perDay: '5', inAll: '50', destinations: 'http://localhost:3001' } },
+};
+
+const originOf = (value: string): string | null => {
+  try {
+    const url = new URL(value);
+    return /^https?:$/.test(url.protocol) ? url.origin : null;
+  } catch {
+    return null;
+  }
+};
 
 interface Draft {
+  kind: Kind;
+  counterparties: string;
   name: string;
   perDeed: string;
   perDay: string;
@@ -41,6 +61,8 @@ interface Draft {
 }
 
 const INITIAL: Draft = {
+  kind: 'airtime',
+  counterparties: '',
   name: '',
   perDeed: '2000',
   perDay: '5000',
@@ -60,7 +82,9 @@ function validate(d: Draft): Errors {
   if (d.name.trim().length === 0) errors.name = 'Name the covenant, so you know it again.';
   else if (d.name.trim().length > 80) errors.name = 'Keep the name under 80 characters.';
   for (const key of ['perDeed', 'perDay', 'inAll'] as const) {
-    if (!AMOUNT.test(d[key]) || compareAmounts(d[key], '0') <= 0) errors[key] = 'A positive amount in naira, e.g. 2000 or 2000.50.';
+    if (!AMOUNTS[d.kind].test(d[key]) || compareAmounts(d[key], '0') <= 0) {
+      errors[key] = d.kind === 'airtime' ? 'A positive amount in naira, e.g. 2000 or 2000.50.' : 'A positive amount in USDC, up to 6 decimals, e.g. 0.50.';
+    }
   }
   if (errors.perDeed === undefined && errors.perDay === undefined && compareAmounts(d.perDeed, d.perDay) > 0) {
     errors.perDay = 'A day must allow at least one full deed.';
@@ -70,14 +94,16 @@ function validate(d: Draft): Errors {
   }
   if (!/^\d+$/.test(d.velocityCount) || Number(d.velocityCount) < 1) errors.velocityCount = 'At least one deed.';
   if (!/^\d+$/.test(d.inFlight) || Number(d.inFlight) < 1) errors.inFlight = 'At least one at a time.';
-  const bad = lines(d.destinations).find((line) => !PHONE.test(line.replace(/[\s-]/g, '')));
-  if (bad !== undefined) errors.destinations = `“${bad}” is not a Nigerian mobile number.`;
+  const bad = lines(d.destinations).find((line) => (d.kind === 'airtime' ? !PHONE.test(line.replace(/[\s-]/g, '')) : originOf(line) === null));
+  if (bad !== undefined) errors.destinations = d.kind === 'airtime' ? `“${bad}” is not a Nigerian mobile number.` : `“${bad}” is not an http(s) origin.`;
+  const badAddress = d.kind === 'x402' ? lines(d.counterparties).find((line) => !ADDRESS.test(line)) : undefined;
+  if (badAddress !== undefined) errors.counterparties = `“${badAddress}” is not an address (0x followed by 40 hex characters).`;
   if (d.until.length === 0 || new Date(`${d.until}T23:59:59+01:00`) <= new Date()) errors.until = 'Choose a day in the future.';
   return errors;
 }
 
 const lines = (text: string) => text.split(/[\n,]/).map((line) => line.trim()).filter(Boolean);
-const display = (amount: string) => (AMOUNT.test(amount) ? naira(amount) : '₦—');
+const display = (amount: string, kind: Kind) => (AMOUNTS[kind].test(amount) ? money(amount, KINDS[kind].asset) : kind === 'airtime' ? '₦—' : '— USDC');
 
 function Field({
   id,
@@ -134,10 +160,20 @@ function Vellum({ d }: { d: Draft }) {
     <article className="vellum" aria-label="Preview of the covenant as written">
       <h2 className="vellum__title">{d.name.trim() || 'An untitled covenant'}</h2>
       <p className="vellum__body">
-        Let it be known that any agent bearing a seal of this covenant may buy <strong>airtime</strong> from your treasury
-        {places.length === 0 ? ' for any number' : ` for ${places.length === 1 ? 'the number ' + places[0] : `these ${places.length} numbers alone`}`}, spending no more than{' '}
-        <strong>{display(d.perDeed)}</strong> in a single deed, <strong>{display(d.perDay)}</strong> in one day, and{' '}
-        <strong>{display(d.inAll)}</strong> in all; making no more than <strong>{d.velocityCount || '—'}</strong> deeds in {window}, nor more
+        Let it be known that any agent bearing a seal of this covenant may{' '}
+        {d.kind === 'airtime' ? (
+          <>
+            buy <strong>airtime</strong> from your treasury
+            {places.length === 0 ? ' for any number' : ` for ${places.length === 1 ? 'the number ' + places[0] : `these ${places.length} numbers alone`}`}
+          </>
+        ) : (
+          <>
+            pay the tolls of <strong>web resources</strong> in USDC
+            {places.length === 0 ? ' on any site' : ` on ${places.length === 1 ? places[0] : `these ${places.length} sites alone`}`}, each toll charged only once the chain has made it final
+          </>
+        )}
+        , spending no more than <strong>{display(d.perDeed, d.kind)}</strong> in a single deed, <strong>{display(d.perDay, d.kind)}</strong> in one day, and{' '}
+        <strong>{display(d.inAll, d.kind)}</strong> in all; making no more than <strong>{d.velocityCount || '—'}</strong> deeds in {window}, nor more
         than <strong>{d.inFlight || '—'}</strong> at once
         {d.duplicateWindow === '0' ? '' : ', nor repeating an identical deed without your word'}; until{' '}
         <strong>{d.until ? longDate(`${d.until}T12:00:00+01:00`) : '—'}</strong>, or until you break its seal.
@@ -164,7 +200,8 @@ export default function DrawCovenant() {
   const shown = (key: keyof Draft) =>
     submitted || touched[key] || (linked[key] ?? []).some((other) => touched[other]) ? errors[key] : undefined;
 
-  const bind = (key: keyof Draft) => ({
+  const affix = draft.kind === 'airtime' ? { prefix: '₦' } : { suffix: 'USDC' };
+  const bind = (key: Exclude<keyof Draft, 'kind'>) => ({
     id: key,
     name: key,
     value: draft[key],
@@ -188,14 +225,16 @@ export default function DrawCovenant() {
       const destinations = lines(draft.destinations);
       const mandate = await client.createMandate({
         name: draft.name.trim(),
+        asset: KINDS[draft.kind].asset,
         per_transaction_limit: draft.perDeed,
         daily_limit: draft.perDay,
         lifetime_limit: draft.inAll,
         velocity: { max_count: Number(draft.velocityCount), window_secs: Number(draft.velocityWindow) },
         max_in_flight: Number(draft.inFlight),
         duplicate_window_secs: Number(draft.duplicateWindow),
-        allowed_categories: ['airtime'],
-        allowed_destinations: destinations.length === 0 ? null : destinations,
+        allowed_categories: draft.kind === 'airtime' ? ['airtime'] : ['x402'],
+        allowed_destinations: destinations.length === 0 ? null : draft.kind === 'x402' ? destinations.map((d) => originOf(d)!) : destinations,
+        allowed_counterparties: draft.kind === 'x402' && lines(draft.counterparties).length > 0 ? lines(draft.counterparties) : null,
         expires_at: new Date(`${draft.until}T23:59:59+01:00`).toISOString(),
       });
       router.push(`/mandate?id=${mandate.id}&drawn=1`, { transitionTypes: FORWARD });
@@ -242,13 +281,13 @@ export default function DrawCovenant() {
                   <span className="article-set__title">The purse</span>
                 </legend>
                 <div className="grid-3">
-                  <Field id="perDeed" label="Per deed" required prefix="₦" error={shown('perDeed')} help="Largest single purchase.">
+                  <Field id="perDeed" {...affix} label="Per deed" required error={shown('perDeed')} help="Largest single purchase.">
                     <input {...bind('perDeed')} inputMode="decimal" />
                   </Field>
-                  <Field id="perDay" label="Per day" required prefix="₦" error={shown('perDay')} help="Resets at midnight, Lagos.">
+                  <Field id="perDay" {...affix} label="Per day" required error={shown('perDay')} help="Resets at midnight, Lagos.">
                     <input {...bind('perDay')} inputMode="decimal" />
                   </Field>
-                  <Field id="inAll" label="In all" required prefix="₦" error={shown('inAll')} help="For the life of the covenant.">
+                  <Field id="inAll" {...affix} label="In all" required error={shown('inAll')} help="For the life of the covenant.">
                     <input {...bind('inAll')} inputMode="decimal" />
                   </Field>
                 </div>
@@ -295,18 +334,44 @@ export default function DrawCovenant() {
                   <span className="article-set__title">The reach</span>
                 </legend>
                 <div className="grid-2">
-                  <Field id="category" label="What may be bought" help="Airtime is the only trade the sandbox knows.">
-                    <input id="category" value="Airtime" readOnly aria-readonly="true" />
+                  <Field id="kind" label="What may be bought" help={draft.kind === 'airtime' ? 'Nigerian airtime, from your naira balance.' : 'Web resources that charge per request over HTTP 402, from your USDC balance.'}>
+                    <select
+                      id="kind"
+                      value={draft.kind}
+                      onChange={(event) => {
+                        const kind = event.target.value as Kind;
+                        // A trade has its own currency: reset the purse to sensible amounts in it.
+                        setDraft((d) => ({ ...d, kind, ...KINDS[kind].defaults, counterparties: '' }));
+                      }}
+                    >
+                      {(Object.keys(KINDS) as Kind[]).map((kind) => (
+                        <option key={kind} value={kind}>
+                          {KINDS[kind].label} · {KINDS[kind].asset}
+                        </option>
+                      ))}
+                    </select>
                   </Field>
                   <Field id="until" label="Until" required error={shown('until')} help="The covenant lapses at the end of this day.">
                     <input {...bind('until')} type="date" min={new Date().toISOString().slice(0, 10)} />
                   </Field>
                 </div>
                 <div style={{ marginTop: 20 }}>
-                  <Field id="destinations" label="Only these numbers" error={shown('destinations')} help="Optional. One per line. Leave empty to allow any Nigerian mobile number.">
-                    <textarea {...bind('destinations')} rows={3} placeholder={'0803 000 0000\n0812 000 0000'} />
+                  <Field
+                    id="destinations"
+                    label={draft.kind === 'airtime' ? 'Only these numbers' : 'Only these sites'}
+                    error={shown('destinations')}
+                    help={draft.kind === 'airtime' ? 'Optional. One per line. Leave empty to allow any Nigerian mobile number.' : 'Optional but wise. One origin per line, e.g. https://api.example.com. Leave empty to allow any site.'}
+                  >
+                    <textarea {...bind('destinations')} rows={3} placeholder={draft.kind === 'airtime' ? '0803 000 0000\n0812 000 0000' : 'https://api.example.com'} />
                   </Field>
                 </div>
+                {draft.kind === 'x402' ? (
+                  <div style={{ marginTop: 20 }}>
+                    <Field id="counterparties" label="Only pay these addresses" error={shown('counterparties')} help="Optional. The payTo addresses tolls may go to, one per line. For covenants that must never pay a stranger.">
+                      <textarea {...bind('counterparties')} rows={2} placeholder="0x…" spellCheck={false} />
+                    </Field>
+                  </div>
+                ) : null}
               </fieldset>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, paddingTop: 32, borderTop: '1px solid var(--line)' }}>

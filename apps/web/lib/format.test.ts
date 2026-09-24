@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { naira, ratio, roman, span } from './format.ts';
+import { money, naira, ratio, roman, span } from './format.ts';
 
 describe('format', () => {
   it('groups naira from the decimal string without floats', () => {
@@ -13,6 +13,13 @@ describe('format', () => {
     expect(ratio('4500.00', '5000.00')).toBe(0.9);
     expect(ratio('0.00', '5000.00')).toBe(0);
     expect(ratio('6000.00', '5000.00')).toBe(1);
+  });
+
+  it('formats USDC with its own precision, and exact sums', () => {
+    expect(money('0.100000', 'USDC')).toBe('0.10 USDC');
+    expect(money('0.123456', 'USDC')).toBe('0.123456 USDC');
+    expect(money('1250.5', 'NGN')).toBe('₦1,250.50');
+    expect(ratio('0.1', '0.5')).toBe(0.2);
   });
 
   it('names windows and numbers articles', () => {
