@@ -11,10 +11,16 @@ const schema = z.object({
   CLERK_JWT_KEY: z.string().optional(),
   CLERK_WEBHOOK_SECRET: z.string().optional(),
   SENTRY_DSN: z.string().optional(),
+  // Agent mandates run sandbox-only until the Stage 2 gate (agent-mandates §1.3).
+  METER_AGENTS_SANDBOX: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  METER_CREDENTIAL_PEPPER: z.string().min(32).optional(),
 }).refine(
   // Tests inject a fake Clerk client; production must have the real secret.
   (value) => value.NODE_ENV !== 'production' || (value.CLERK_SECRET_KEY ?? '').length > 0,
   { message: 'CLERK_SECRET_KEY is required in production', path: ['CLERK_SECRET_KEY'] },
+).refine(
+  (value) => value.NODE_ENV !== 'production' || value.METER_CREDENTIAL_PEPPER !== undefined,
+  { message: 'METER_CREDENTIAL_PEPPER is required in production', path: ['METER_CREDENTIAL_PEPPER'] },
 );
 
 export type Env = z.infer<typeof schema>;

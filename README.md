@@ -17,6 +17,73 @@ pnpm db:up && pnpm db:migrate
 pnpm dev
 ```
 
+## What works today: agent mandates (sandbox)
+
+A user can give an AI agent **scoped, revocable, auditable authority to spend
+from their balance**, exercised end to end on Nigerian airtime through a
+fault-injecting provider simulator. Sandbox only, behind
+`METER_AGENTS_SANDBOX=true`; the Stage 2 gate is unchanged. Design:
+[agent mandates](docs/superpowers/2026-09-24-meter-agent-mandates-design.md).
+Demo recording: not recorded yet.
+
+```text
+Agent (LLM via MCP)
+   │ POST /v1/agent/purchases  (Idempotency-Key)
+   ▼
+┌──────────────────── TX1  SERIALIZABLE ────────────────────┐
+│ claim key · lock credential, mandate · 13 ordered checks   │
+│ ledger reserve (available → reserved) · decision · purchase│
+└────────────────────────────────────────────────────────────┘
+   │ 202 { purchase_id, status: processing }
+   ▼
+Finalizer worker (claims with SKIP LOCKED)
+   ├─ TX2: pending_dispatch → dispatching (write-ahead, commit)
+   ├─ provider.send(request_id = purchase_id)   ← no transaction open
+   └─ TX3: delivered → capture · rejected → release · not_sent → retry
+           unknown → hold, requery … deadline → unresolved (operator)
+```
+
+A network call never happens inside a database transaction, and no money moves
+on a guess: an ambiguous provider answer holds the funds until a requery or an
+operator with evidence settles it.
+
+Run the demo locally (Postgres up, `METER_AGENTS_SANDBOX=true` in `.env`):
+
+```bash
+pnpm --filter @meter/server build
+pnpm --filter @meter/server start          # API on $PORT
+pnpm --filter @meter/server start:worker   # finalizer + hold sweeper
+pnpm demo:setup                            # ₦10,000 credit, demo mandate, prints an mtr_agt_ token once
+pnpm demo:timeline <purchase_id>           # decision → ledger → provider → capture
+METER_AGENT_CREDENTIAL=mtr_agt_… pnpm demo:concurrency 20
+```
+
+`demo:setup` exists because owner routes need a Clerk session; with one, use
+`POST /v1/sandbox/credit`, `POST /v1/mandates` and
+`POST /v1/mandates/:id/credentials` instead. Simulated outcomes are chosen by the
+destination's last four digits: `0000` delivered, `0001` rejected, `0002`/`0003`
+unknown then delivered/rejected, `0004` not found then delivered, `0005` pending
+until `unresolved`, `0006` connection refused twice, `0007` hangs 20 s so the
+worker can be killed mid-send.
+
+Register the MCP server in Claude Desktop's config:
+
+```json
+{
+  "mcpServers": {
+    "meter": {
+      "command": "node",
+      "args": ["/absolute/path/to/meter/apps/mcp/src/index.ts"],
+      "env": { "METER_API_URL": "http://localhost:3001", "METER_AGENT_CREDENTIAL": "mtr_agt_…" }
+    }
+  }
+}
+```
+
+Tools: `get_spending_power`, `buy_airtime`, `get_purchase`, `list_purchases`.
+The MCP process holds one agent credential and calls only the public agent API:
+it has no database access and no route to owner or operator endpoints.
+
 ## Core and verticals
 
 Meter Core (PRD §5) owns identity, funding, the ledger, catalog and price versions,
@@ -28,14 +95,15 @@ or its own definition of "captured".
 | Stage | Product | Meters | Status |
 | --- | --- | --- | --- |
 | 1 | Meter AI | tokens, tasks, documents | building |
-| 2 | Meter Agents | scoped programmatic spend, x402 | gated on Stage 1 exit |
+| 2 | Meter Agents | scoped programmatic spend, x402 | authority primitives in sandbox; production gated on Stage 1 exit |
 | 3 | Meter Providers | third-party billable units | gated on Stage 2 exit |
 | 4 | Meter Content | articles, unlocks, entitlements | gated on Stage 3 exit |
 | 5 | Meter Sessions | minutes | gated on Stage 3 exit |
 | 6 | Meter Physical | kWh, litres, cycles | gated on partner + regulator |
 
-Only `modules/products/ai` exists. The other five are directories nobody has written
-yet on purpose — each is gated behind a measured exit gate in PRD §9.
+`modules/products/ai` and a sandbox-only `modules/products/agents` exist. The rest
+are directories nobody has written yet on purpose — each is gated behind a
+measured exit gate in PRD §9.
 
 ## Layout
 
@@ -46,6 +114,7 @@ yet on purpose — each is gated behind a measured exit gate in PRD §9.
 | `apps/server/src/adapters` | External providers behind Meter-owned interfaces. |
 | `apps/server/src/platform` | Database, jobs, telemetry, security. |
 | `apps/web` | Static Next.js PWA. No financial logic, no direct database access. |
+| `apps/mcp` | Stdio MCP server for agents. A pure HTTP client of the agent API. |
 | `packages/contracts` | Browser-safe schemas, incl. the canonical transaction model. |
 | `packages/config` | Typed environment, validated at boot. |
 | `database/migrations` | Reviewed SQL, applied in filename order. |
@@ -125,3 +194,12 @@ concurrent authorizations cannot overspend, capture cannot exceed its
 reservation, capture plus release equals the original reservation, recognized
 retries cannot create value, and a projection rebuild reproduces the recorded
 balances.
+
+Agent mandates add seven more (design §12.1): I9 mandate exposure never
+exceeds a limit under concurrency; I10 a hold is captured or released exactly
+once, never both (property test over interleaved finalizer, sweeper, revocation
+and operator actions); I11 an unknown provider outcome never moves money; I12 a
+worker killed after write-ahead causes at most one send; I13 a declined request
+writes no ledger row and reaches no provider; I14 a credential revoked before an
+authorization commits cannot authorize; I15 pre-dispatch expiry and revocation
+release exactly the held amount once.

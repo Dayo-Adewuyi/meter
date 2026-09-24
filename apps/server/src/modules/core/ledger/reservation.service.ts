@@ -1,6 +1,6 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { AssetCode } from '@meter/contracts';
-import type { Kysely, Transaction } from 'kysely';
+import { type Kysely, type Transaction, sql } from 'kysely';
 import { DATABASE } from '../../../platform/database/database.module.ts';
 import {
   DEFAULT_RETRY_POLICY,
@@ -92,6 +92,18 @@ async function lockReservation(
   return reservation;
 }
 
+/**
+ * The `*InTransaction` variants let a caller commit its own state change in
+ * the same transaction as the ledger movement it describes. Anything weaker
+ * than SERIALIZABLE would void the balance checks those variants rely on.
+ */
+async function assertSerializable(trx: Transaction<DB>): Promise<void> {
+  const { rows } = await sql<{ transaction_isolation: string }>`show transaction_isolation`.execute(trx);
+  if (rows[0]?.transaction_isolation !== 'serializable') {
+    throw new LedgerError('LEDGER_REQUIRES_SERIALIZABLE');
+  }
+}
+
 @Injectable()
 export class ReservationService {
   constructor(
@@ -101,29 +113,33 @@ export class ReservationService {
 
   /** Holds value without spending it: debit available, credit reserved. */
   async reserve(command: ReserveCommand): Promise<ReservationResult> {
+    return serializable(this.db, (trx) => this.reserveInTransaction(trx, command), this.retry);
+  }
+
+  /** Caller owns the SERIALIZABLE transaction and its retry. No network calls. */
+  async reserveInTransaction(trx: Transaction<DB>, command: ReserveCommand): Promise<ReservationResult> {
     if (command.amountAtomic <= 0n) {
       throw new LedgerError('INVALID_ENTRY_AMOUNT', 'amount must be positive');
     }
 
-    return serializable(this.db, async (trx) => {
-      await acquireLedgerLock(trx);
-      const { result, replayed } = await executeIdempotent(
-        trx,
-        {
-          scope: command.idempotencyScope,
-          key: command.idempotencyKey,
-          request: {
-            kind: 'reserve',
-            availableAccountId: command.availableAccountId,
-            reservedAccountId: command.reservedAccountId,
-            assetCode: command.assetCode,
-            amountAtomic: command.amountAtomic,
-          },
+    await assertSerializable(trx);
+    await acquireLedgerLock(trx);
+    const { result, replayed } = await executeIdempotent(
+      trx,
+      {
+        scope: command.idempotencyScope,
+        key: command.idempotencyKey,
+        request: {
+          kind: 'reserve',
+          availableAccountId: command.availableAccountId,
+          reservedAccountId: command.reservedAccountId,
+          assetCode: command.assetCode,
+          amountAtomic: command.amountAtomic,
         },
-        () => this.postReserve(trx, command),
-      );
-      return { ...result, replayed };
-    }, this.retry);
+      },
+      () => this.postReserve(trx, command),
+    );
+    return { ...result, replayed };
   }
 
   private async postReserve(
@@ -205,28 +221,32 @@ export class ReservationService {
    * through `capped`, so a caller never moves value it never held.
    */
   async capture(command: CaptureCommand): Promise<CaptureResult> {
+    return serializable(this.db, (trx) => this.captureInTransaction(trx, command), this.retry);
+  }
+
+  /** Caller owns the SERIALIZABLE transaction and its retry. No network calls. */
+  async captureInTransaction(trx: Transaction<DB>, command: CaptureCommand): Promise<CaptureResult> {
     if (command.amountAtomic <= 0n) {
       throw new LedgerError('INVALID_ENTRY_AMOUNT', 'amount must be positive');
     }
 
-    return serializable(this.db, async (trx) => {
-      await acquireLedgerLock(trx);
-      const { result, replayed } = await executeIdempotent(
-        trx,
-        {
-          scope: command.idempotencyScope,
-          key: command.idempotencyKey,
-          request: {
-            kind: 'capture',
-            reservationId: command.reservationId,
-            destinationAccountId: command.destinationAccountId,
-            amountAtomic: command.amountAtomic,
-          },
+    await assertSerializable(trx);
+    await acquireLedgerLock(trx);
+    const { result, replayed } = await executeIdempotent(
+      trx,
+      {
+        scope: command.idempotencyScope,
+        key: command.idempotencyKey,
+        request: {
+          kind: 'capture',
+          reservationId: command.reservationId,
+          destinationAccountId: command.destinationAccountId,
+          amountAtomic: command.amountAtomic,
         },
-        () => this.postCapture(trx, command),
-      );
-      return { ...result, replayed };
-    }, this.retry);
+      },
+      () => this.postCapture(trx, command),
+    );
+    return { ...result, replayed };
   }
 
   private async postCapture(
@@ -324,19 +344,23 @@ export class ReservationService {
 
   /** Returns all unused value to the customer and closes the authorization. */
   async release(command: ReleaseCommand): Promise<ReleaseResult> {
-    return serializable(this.db, async (trx) => {
-      await acquireLedgerLock(trx);
-      const { result, replayed } = await executeIdempotent(
-        trx,
-        {
-          scope: command.idempotencyScope,
-          key: command.idempotencyKey,
-          request: { kind: 'release', reservationId: command.reservationId },
-        },
-        () => this.postRelease(trx, command),
-      );
-      return { ...result, replayed };
-    }, this.retry);
+    return serializable(this.db, (trx) => this.releaseInTransaction(trx, command), this.retry);
+  }
+
+  /** Caller owns the SERIALIZABLE transaction and its retry. No network calls. */
+  async releaseInTransaction(trx: Transaction<DB>, command: ReleaseCommand): Promise<ReleaseResult> {
+    await assertSerializable(trx);
+    await acquireLedgerLock(trx);
+    const { result, replayed } = await executeIdempotent(
+      trx,
+      {
+        scope: command.idempotencyScope,
+        key: command.idempotencyKey,
+        request: { kind: 'release', reservationId: command.reservationId },
+      },
+      () => this.postRelease(trx, command),
+    );
+    return { ...result, replayed };
   }
 
   private async postRelease(

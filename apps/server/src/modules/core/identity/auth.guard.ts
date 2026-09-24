@@ -14,6 +14,7 @@ import {
   type AuthenticatorPort,
 } from './authenticator.port.ts';
 import { IDENTITY_REPOSITORY, type IdentityRepository } from './identity.repository.ts';
+import { AGENT_ROUTE } from '../authorization/agent-principal.ts';
 import { PUBLIC_ROUTE } from './public-route.ts';
 
 export type AuthDenialCode = 'UNAUTHENTICATED' | 'INVALID_TOKEN' | 'IDENTITY_NOT_FOUND';
@@ -57,6 +58,12 @@ export class AuthGuard implements CanActivate {
       context.getClass(),
     ]);
     if (isPublic === true) return true;
+    // Agent routes carry their own guard (AgentRoute); a human session never passes it.
+    const isAgentRoute = this.reflector.getAllAndOverride<boolean>(AGENT_ROUTE, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isAgentRoute === true) return true;
 
     const request = context.switchToHttp().getRequest<FastifyRequest>();
     const token = bearerToken(request.headers.authorization);

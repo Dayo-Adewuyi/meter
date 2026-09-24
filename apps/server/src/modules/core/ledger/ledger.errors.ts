@@ -18,6 +18,7 @@ export const LEDGER_ERROR_CODES = [
   'TRANSACTION_NOT_FOUND',
   'NON_REVERSIBLE_TRANSACTION',
   'ALREADY_REVERSED',
+  'LEDGER_REQUIRES_SERIALIZABLE',
 ] as const;
 
 export type LedgerErrorCode = (typeof LEDGER_ERROR_CODES)[number];
