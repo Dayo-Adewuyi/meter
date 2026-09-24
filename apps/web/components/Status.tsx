@@ -8,6 +8,9 @@ const WORDS: Record<string, string> = {
   failed: 'Refused',
   declined: 'Denied',
   expired: 'Lapsed',
+  pending: 'Awaiting the chain',
+  settled: 'Settled',
+  lapsed: 'Lapsed',
 };
 
 /** Status as word + glyph + colour, never colour alone. */

@@ -9,7 +9,7 @@ import { RoseWindow } from '@/components/RoseWindow';
 import { useToast } from '@/components/Shell';
 import { Status } from '@/components/Status';
 import { Plus, Quatrefoil } from '@/components/icons';
-import { addAmounts, dayMonth, naira, ratio } from '@/lib/format';
+import { addAmounts, compareAmounts, dayMonth, money, naira, ratio, roseFigure } from '@/lib/format';
 import { useMeter, useResource } from '@/lib/meter';
 import type { Mandate } from '@/lib/types';
 
@@ -58,6 +58,26 @@ function Treasury() {
         <span>Held for deeds in passage</span>
         <span className="figure">{balance.data === undefined ? '—' : naira(balance.data.reserved)}</span>
       </div>
+      {(balance.data?.balances ?? [])
+        .filter((b) => b.asset !== 'NGN')
+        .map((b) => (
+          <div key={b.asset}>
+            <div className="treasury__held">
+              <span>{b.asset} for web tolls</span>
+              <span className="figure gilt" style={{ whiteSpace: 'nowrap' }}>
+                {money(b.available, b.asset)}
+              </span>
+            </div>
+            {compareAmounts(b.reserved, '0') > 0 ? (
+              <div className="treasury__held" style={{ borderTop: 0, marginTop: 4, paddingTop: 0 }}>
+                <span>Held for tolls awaiting the chain</span>
+                <span className="figure" style={{ whiteSpace: 'nowrap' }}>
+                  {money(b.reserved, b.asset)}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        ))}
       <div className="tithe">
         <p className="eyebrow">{demo ? 'Tithe (demonstration)' : 'Tithe (sandbox)'}</p>
         <div className="tithe__options">
@@ -84,24 +104,26 @@ function Covenant({ mandate, i }: { mandate: Mandate; i: number }) {
       <header className="arch__head">
         <Status status={mandate.status} />
         <h3 className="display display--card">{mandate.name}</h3>
+        <p className="eyebrow" style={{ marginTop: 10 }}>
+          {mandate.limits.allowed_categories.includes('x402') ? 'Paid web resources · USDC' : 'Airtime · NGN'}
+        </p>
       </header>
       <div className="arch__rose">
         <RoseWindow
           size={172}
           used={used}
-          value={naira(mandate.exposure.daily_remaining).replace(/\.00$/, '')}
-          label="left today"
-          description={`${naira(mandate.exposure.today)} of the ${naira(mandate.limits.daily)} daily limit used; ${naira(mandate.exposure.daily_remaining)} remains.`}
+          {...roseFigure(mandate.exposure.daily_remaining, mandate.asset, 'left today')}
+          description={`${money(mandate.exposure.today, mandate.asset)} of the ${money(mandate.limits.daily, mandate.asset)} daily limit used; ${money(mandate.exposure.daily_remaining, mandate.asset)} remains.`}
         />
       </div>
       <dl className="arch__terms">
         <div>
           <dt>Per deed</dt>
-          <dd className="figure">{naira(mandate.limits.per_transaction)}</dd>
+          <dd className="figure">{money(mandate.limits.per_transaction, mandate.asset)}</dd>
         </div>
         <div>
           <dt>Per day</dt>
-          <dd className="figure">{naira(mandate.limits.daily)}</dd>
+          <dd className="figure">{money(mandate.limits.daily, mandate.asset)}</dd>
         </div>
         <div>
           <dt>Seals</dt>
@@ -147,7 +169,7 @@ export default function Overview() {
             {[
               ['Covenants in force', String(active.length)],
               ['Seals in service', String(active.reduce((n, m) => n + m.credentials.filter((c) => c.status === 'active').length, 0))],
-              ['Spent today', naira(addAmounts(active.map((m) => m.exposure.today)))],
+              ['Spent today', naira(addAmounts(active.filter((m) => m.asset === 'NGN').map((m) => m.exposure.today)))],
               ['Deeds in passage', String(active.reduce((n, m) => n + m.exposure.in_flight, 0))],
             ].map(([label, value]) => (
               <div key={label} className="vigil__item">

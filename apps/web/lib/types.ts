@@ -33,6 +33,7 @@ export interface Mandate {
     readonly duplicate_window_secs: number;
     readonly allowed_categories: readonly string[];
     readonly allowed_destinations: readonly string[] | null;
+    readonly allowed_counterparties?: readonly string[] | null;
   };
   readonly exposure: {
     readonly today: string;
@@ -83,6 +84,11 @@ export interface Timeline {
     readonly delivery_status: string;
     readonly credential_label: string;
     readonly created_at: string;
+    /** x402 only. */
+    readonly pay_to?: string;
+    readonly nonce?: string | null;
+    readonly valid_before?: string | null;
+    readonly settlement_tx?: string | null;
   };
   readonly entries: readonly TimelineEntry[];
 }
@@ -91,18 +97,39 @@ export interface Balance {
   readonly asset: string;
   readonly available: string;
   readonly reserved: string;
+  readonly balances?: readonly { readonly asset: string; readonly available: string; readonly reserved: string }[];
+}
+
+/** An agent's payment for an x402 resource (pending until the chain is final). */
+export interface X402Payment {
+  readonly payment_id: string;
+  readonly status: 'pending' | 'settled' | 'lapsed' | 'declined';
+  readonly state: string;
+  readonly amount: string;
+  readonly asset: 'USDC';
+  readonly network: string;
+  readonly pay_to: string;
+  readonly resource_url: string;
+  readonly method: string;
+  readonly intent: string;
+  readonly valid_before: string | null;
+  readonly settlement_tx: string | null;
+  readonly credential_label?: string;
+  readonly created_at: string;
 }
 
 export interface CreateMandateInput {
   readonly name: string;
+  readonly asset: 'NGN' | 'USDC';
   readonly per_transaction_limit: string;
   readonly daily_limit: string;
   readonly lifetime_limit: string;
   readonly velocity: { readonly max_count: number; readonly window_secs: number };
   readonly max_in_flight: number;
   readonly duplicate_window_secs: number;
-  readonly allowed_categories: readonly ['airtime'];
+  readonly allowed_categories: readonly ['airtime'] | readonly ['x402'];
   readonly allowed_destinations: readonly string[] | null;
+  readonly allowed_counterparties?: readonly string[] | null;
   readonly expires_at: string;
 }
 
@@ -117,6 +144,8 @@ export interface MeterClient {
   revokeCredential(id: string): Promise<void>;
   purchases(mandateId: string): Promise<readonly Purchase[]>;
   timeline(purchaseId: string): Promise<Timeline>;
+  x402Payments(mandateId: string): Promise<readonly X402Payment[]>;
+  x402Timeline(paymentId: string): Promise<Timeline>;
 }
 
 export class ApiError extends Error {

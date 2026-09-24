@@ -42,5 +42,8 @@ export function httpClient(baseUrl: string, getToken: TokenSource): MeterClient 
     purchases: async (mandateId) =>
       (await request<{ purchases: Awaited<ReturnType<MeterClient['purchases']>> }>('GET', `/mandates/${mandateId}/purchases?limit=50`)).purchases,
     timeline: (purchaseId) => request('GET', `/purchases/${purchaseId}/timeline`),
+    x402Payments: async (mandateId) =>
+      (await request<{ payments: Awaited<ReturnType<MeterClient['x402Payments']>> }>('GET', `/mandates/${mandateId}/x402-payments?limit=50`)).payments,
+    x402Timeline: (paymentId) => request('GET', `/x402/payments/${paymentId}/timeline`),
   };
 }

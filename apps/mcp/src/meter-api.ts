@@ -34,6 +34,18 @@ export class MeterApi {
     return this.request('GET', `/v1/agent/purchases?limit=${limit}`);
   }
 
+  createX402Payment(body: object, idempotencyKey: string): Promise<ApiResponse> {
+    return this.request('POST', '/v1/agent/x402/payments', body, { 'idempotency-key': idempotencyKey });
+  }
+
+  getX402Payment(id: string): Promise<ApiResponse> {
+    return this.request('GET', `/v1/agent/x402/payments/${encodeURIComponent(id)}`);
+  }
+
+  x402Settlement(id: string, paymentResponse: string): Promise<ApiResponse> {
+    return this.request('POST', `/v1/agent/x402/payments/${encodeURIComponent(id)}/settlement`, { payment_response: paymentResponse });
+  }
+
   private async request(method: string, path: string, body?: object, headers: Record<string, string> = {}): Promise<ApiResponse> {
     const response = await this.fetchImpl(new URL(path, this.baseUrl), {
       method,

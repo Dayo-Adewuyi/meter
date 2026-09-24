@@ -103,7 +103,7 @@ describe('agents HTTP API', () => {
         expect((await call('GET', `/purchases/${purchaseId}/timeline`, 'operator')).statusCode).toBe(200);
 
         // Owner reads the balance and the mandate's purchases; another owner sees nothing.
-        expect((await call('GET', '/balance', 'owner')).json()).toEqual({ asset: 'NGN', available: '9500.00', reserved: '0.00' });
+        expect((await call('GET', '/balance', 'owner')).json()).toEqual({ asset: 'NGN', available: '9500.00', reserved: '0.00', balances: [{ asset: 'NGN', available: '9500.00', reserved: '0.00' }] });
         const listed = (await call('GET', `/mandates/${mandateId}/purchases?limit=10`, 'owner')).json();
         expect(listed.purchases.map((p: { status: string }) => p.status)).toEqual(['declined', 'delivered']);
         expect(listed.purchases[0].credential_label).toBe('claude');

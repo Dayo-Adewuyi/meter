@@ -3,7 +3,7 @@ import type { AssetCode } from '@meter/contracts';
 import { type Kysely, type Transaction, sql } from 'kysely';
 import type { DB } from '../../../platform/database/types.ts';
 import { canonicalJson } from '../ledger/canonical-request.ts';
-import { SYSTEM_ACCOUNT_IDS } from '../ledger/account-taxonomy.ts';
+import { SYSTEM_ACCOUNT_IDS, USDC_SYSTEM_ACCOUNT_IDS } from '../ledger/account-taxonomy.ts';
 import { postedAmount } from '../ledger/credit-debit.service.ts';
 import { ReservationService } from '../ledger/reservation.service.ts';
 import {
@@ -140,7 +140,7 @@ export class AuthorizationService {
           countAuthorizations(trx, mandate!.id, {
             since: secondsBefore(now, mandate!.duplicate_window_secs),
             states: ['authorized', 'captured'],
-            destination: request.destination,
+            destination: request.duplicateKey ?? request.destination,
             amount: request.amount,
           }),
         velocityCount: () =>
@@ -194,7 +194,8 @@ export class AuthorizationService {
         asset_code: mandate!.asset_code,
         amount: request.amount.toString(),
         category: request.category,
-        destination: request.destination,
+        // The duplicate guard's key (§6.4): the destination, or a finer key such as an x402 resource URL.
+        destination: request.duplicateKey ?? request.destination,
         hold_expires_at: holdExpiresAt,
         correlation_id: input.correlationId,
         created_at: now,
@@ -238,7 +239,8 @@ export class AuthorizationService {
       idempotencyKey: authorizationId,
       correlationId: authorization.correlation_id,
       reservationId: authorization.reservation_id,
-      destinationAccountId: SYSTEM_ACCOUNT_IDS.provider_payable,
+      // The provider payable in the hold's own asset; a capture never converts.
+      destinationAccountId: authorization.asset_code === 'USDC' ? USDC_SYSTEM_ACCOUNT_IDS.provider_payable : SYSTEM_ACCOUNT_IDS.provider_payable,
       amountAtomic: BigInt(authorization.amount),
     });
     await this.close(trx, authorizationId, 'captured', capture.capturedAmountAtomic);
@@ -265,7 +267,7 @@ export class AuthorizationService {
   private async lockOpen(trx: Transaction<DB>, authorizationId: string) {
     const authorization = await trx
       .selectFrom('authz.authorizations')
-      .select(['reservation_id', 'amount', 'correlation_id', 'state'])
+      .select(['reservation_id', 'amount', 'asset_code', 'correlation_id', 'state'])
       .where('id', '=', authorizationId)
       .forUpdate()
       .executeTakeFirstOrThrow();

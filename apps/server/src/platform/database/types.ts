@@ -171,6 +171,7 @@ export interface AuthzMandatesTable {
   duplicate_window_secs: ColumnType<number, number | undefined, number>;
   allowed_categories: string[];
   allowed_destinations: string[] | null;
+  allowed_counterparties: ColumnType<string[] | null, string[] | null | undefined, string[] | null>;
   expires_at: Date;
   revoked_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   revoked_reason: ColumnType<string | null, string | null | undefined, string | null>;
@@ -274,6 +275,56 @@ export interface AgentsPurchaseEventsTable {
   created_at: ColumnType<Date, Date | undefined, never>;
 }
 
+export type X402State = 'declined' | 'signed' | 'settled' | 'lapsed' | 'unresolved';
+
+export interface AgentsX402PaymentsTable {
+  id: ColumnType<string, string | undefined, never>;
+  credential_id: string;
+  idempotency_key: string;
+  request_digest: string;
+  authorization_id: string | null;
+  decision_id: string;
+  network: string;
+  asset: string;
+  pay_to: string;
+  amount: string;
+  asset_code: 'USDC';
+  resource_url: string;
+  resource_origin: string;
+  method: string;
+  intent: string;
+  state: X402State;
+  canonical_state: string;
+  auth_from: string | null;
+  auth_nonce: string | null;
+  valid_after: string | null;
+  valid_before: string | null;
+  signature: string | null;
+  payment_payload: string | null;
+  settlement_tx: ColumnType<string | null, string | null | undefined, string | null>;
+  settlement_block: ColumnType<string | null, string | null | undefined, string | null>;
+  settled_value: ColumnType<string | null, string | null | undefined, string | null>;
+  check_attempts: ColumnType<number, number | undefined, number>;
+  next_action_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  lease_until: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  resolve_deadline_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  correlation_id: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface AgentsX402PaymentEventsTable {
+  id: ColumnType<string, string | undefined, never>;
+  payment_id: string;
+  from_state: string | null;
+  to_state: string;
+  actor: string;
+  reason: string;
+  detail: ColumnType<JsonValue, string | undefined, never>;
+  ledger_transaction_id: string | null;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
 // Generated-by-hand for now; swap to kysely-codegen once the schema settles.
 // Money columns are NUMERIC(38,0) and arrive as strings — convert with @meter/contracts.
 export interface DB {
@@ -295,4 +346,6 @@ export interface DB {
   'authz.decisions': AuthzDecisionsTable;
   'agents.purchases': AgentsPurchasesTable;
   'agents.purchase_events': AgentsPurchaseEventsTable;
+  'agents.x402_payments': AgentsX402PaymentsTable;
+  'agents.x402_payment_events': AgentsX402PaymentEventsTable;
 }

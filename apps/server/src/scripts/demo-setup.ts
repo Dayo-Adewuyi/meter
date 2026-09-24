@@ -53,7 +53,47 @@ try {
     expiresAt: new Date(Date.now() + 30 * 86_400_000),
   });
 
-  console.log(JSON.stringify({ owner_id: ownerId, mandate_id: mandate.id, credential_id: credential.id, token: credential.token }, null, 2));
+  // An x402 covenant: 25 USDC for the sandbox oracle on this API's origin (the API's
+  // sandbox faucet backs the USDC on its simulated chain within seconds).
+  const usdc = await serializable(db, (trx) => ensureCustomerAccounts(trx, ownerId, 'USDC'));
+  await app.get(CreditDebitService).credit({
+    idempotencyScope: 'sandbox.credit',
+    idempotencyKey: `${ownerId}:demo-setup:usdc:${randomUUID()}`,
+    correlationId: randomUUID(),
+    availableAccountId: usdc.available,
+    assetCode: 'USDC',
+    amountAtomic: 25_000_000n,
+    metadata: { source: 'demo:setup' },
+  });
+  const oracle = await mandates.create(ownerId, {
+    name: 'Oracle budget',
+    assetCode: 'USDC',
+    perTransactionLimit: 500_000n, // 0.50 USDC
+    dailyLimit: 5_000_000n,
+    lifetimeLimit: 50_000_000n,
+    velocityMaxCount: 20,
+    velocityWindowSecs: 600,
+    allowedCategories: ['x402'],
+    allowedDestinations: [`http://localhost:${env.PORT}`],
+    expiresAt: new Date(Date.now() + 30 * 86_400_000),
+  });
+  const oracleSeal = await mandates.issueCredential(ownerId, oracle.id, {
+    label: 'Claude Desktop (x402)',
+    scopes: ['purchases:create', 'purchases:read'],
+    expiresAt: new Date(Date.now() + 30 * 86_400_000),
+  });
+
+  console.log(
+    JSON.stringify(
+      {
+        owner_id: ownerId,
+        airtime: { mandate_id: mandate.id, credential_id: credential.id, token: credential.token },
+        x402: { mandate_id: oracle.id, credential_id: oracleSeal.id, token: oracleSeal.token, oracle: `http://localhost:${env.PORT}/v1/sandbox/x402/oracle?q=…` },
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await app.close();
 }

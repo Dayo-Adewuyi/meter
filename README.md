@@ -80,6 +80,28 @@ Register the MCP server in Claude Desktop's config:
 }
 ```
 
+### x402: agents paying for web resources
+
+Agents can also pay for any [x402](https://github.com/coinbase/x402) resource
+(HTTP 402, v2) in USDC, per request, under the same covenant model. Design:
+[x402 payments](docs/superpowers/2026-09-24-meter-x402-design.md).
+
+- Meter pays from one omnibus wallet and signs an EIP-3009 authorization only
+  after the covenant allows the payment and the funds are held. The agent never
+  holds a key.
+- The chain is the only witness. A payment is charged when the authorization
+  is spent at the `safe` head, and released when chain time passes
+  `validBefore` with it unspent. The agent, the seller and the facilitator are
+  never believed.
+- Reconciliation checks the omnibus wallet against the ledger and flags any
+  nonce Meter did not issue.
+
+In sandbox everything runs offline on a simulated chain inside the API process,
+with a paywalled demo resource at `GET /v1/sandbox/x402/oracle?q=…`
+(`&fault=never|late|after_expiry|refuse` to misbehave). `METER_X402_CHAIN=base-sepolia`
+switches to Base Sepolia over JSON-RPC with a real facilitator. `pnpm demo:setup`
+also draws a 25 USDC oracle covenant; the MCP tools are `fetch_paid` and `get_payment`.
+
 The owner web app (`apps/web`) is where people use this: draw a covenant (a
 mandate) with a live parchment preview, watch its limits fill as rose windows,
 forge a seal (credential) and break it to read the token once, dissolve a
@@ -94,7 +116,8 @@ pnpm --filter @meter/web dev   # http://localhost:3000, demo data
 With a key it signs in through Clerk and calls the API at
 `NEXT_PUBLIC_METER_API_URL`; set `WEB_ORIGIN` on the server so the browser may call it.
 
-Tools: `get_spending_power`, `buy_airtime`, `get_purchase`, `list_purchases`.
+Tools: `get_spending_power`, `buy_airtime`, `get_purchase`, `list_purchases`,
+`fetch_paid`, `get_payment`.
 The MCP process holds one agent credential and calls only the public agent API:
 it has no database access and no route to owner or operator endpoints.
 
@@ -217,3 +240,10 @@ worker killed after write-ahead causes at most one send; I13 a declined request
 writes no ledger row and reaches no provider; I14 a credential revoked before an
 authorization commits cannot authorize; I15 pre-dispatch expiry and revocation
 release exactly the held amount once.
+
+x402 adds five more: I16 Meter signs only an approved, reserved payment, for
+exactly what was reserved; I17 one payment yields at most one authorization;
+I18 a hold is released only after `validBefore` has passed at the safe head
+with the nonce unused; I19 only an on-chain use at the safe head captures (not
+the agent, the seller, or a reorged block; fast-check over adversarial sellers);
+I20 the omnibus reconciles to the ledger and a foreign nonce is caught.

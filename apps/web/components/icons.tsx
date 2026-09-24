@@ -106,10 +106,13 @@ export const StatusGlyph = ({ status, size = 14 }: { status: string; size?: numb
   switch (status) {
     case 'active':
     case 'delivered':
+    case 'settled':
       return <Check size={size} />;
     case 'processing':
+    case 'pending':
       return <Quatrefoil size={size} />;
     case 'expired':
+    case 'lapsed':
       return <Flame size={size} />;
     default:
       return <Cross size={size} />;

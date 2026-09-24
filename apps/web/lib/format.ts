@@ -5,15 +5,16 @@ export function naira(amount: string): string {
   return `${amount.startsWith('-') ? '−' : ''}₦${grouped}.${fraction.padEnd(2, '0').slice(0, 2)}`;
 }
 
+// Six decimal places covers both NGN (2) and USDC (6) exactly.
 const toCents = (value: string) => {
   const [whole = '0', fraction = ''] = value.split('.');
-  return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0').slice(0, 2) || '0');
+  return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0').slice(0, 6) || '0');
 };
 
 /** Sum decimal strings exactly. */
 export function addAmounts(values: readonly string[]): string {
   const total = values.reduce((sum, value) => sum + toCents(value), 0n);
-  return `${total / 100n}.${String(total % 100n).padStart(2, '0')}`;
+  return `${total / 1_000_000n}.${String(total % 1_000_000n).padStart(6, '0').slice(0, 2)}`;
 }
 
 /** Compare decimal strings exactly: negative, zero or positive. */
@@ -21,6 +22,23 @@ export function compareAmounts(a: string, b: string): number {
   const d = toCents(a) - toCents(b);
   return d === 0n ? 0 : d < 0n ? -1 : 1;
 }
+
+/** "0.100000" USDC → "0.10 USDC"; NGN → "₦…". Trailing zeros beyond cents are dropped. */
+export function money(amount: string, asset: string): string {
+  if (asset === 'NGN') return naira(amount);
+  const [whole = '0', fraction = ''] = amount.split('.');
+  const trimmed = fraction.replace(/0+$/, '').padEnd(2, '0');
+  return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${trimmed} ${asset}`;
+}
+
+/** Short form for tight spaces: ₦3,500 / 4.90 USDC. */
+export const moneyShort = (amount: string, asset: string) => money(amount, asset).replace(/\.00(?= |$)/, '');
+
+/** A rose window's centre: the figure alone, with a non-naira currency moved into the label. */
+export const roseFigure = (amount: string, asset: string, label: string) =>
+  asset === 'NGN' ? { value: moneyShort(amount, asset), label } : { value: moneyShort(amount, asset).replace(` ${asset}`, ''), label: `${asset} ${label}` };
+
+export const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 
 /** Share of `limit` used, 0..1, from decimal strings. */
 export function ratio(used: string, limit: string): number {
