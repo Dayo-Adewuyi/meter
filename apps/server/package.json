@@ -10,7 +10,10 @@
     "start:worker": "node dist/bootstrap/worker.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:financial": "vitest run --config vitest.financial.config.ts"
+    "test:financial": "vitest run --config vitest.financial.config.ts",
+    "demo:timeline": "node --env-file-if-exists=../../.env src/scripts/demo-timeline.ts",
+    "demo:concurrency": "node --env-file-if-exists=../../.env src/scripts/demo-concurrency.ts",
+    "demo:setup": "node --env-file-if-exists=../../.env dist/scripts/demo-setup.js"
   },
   "dependencies": {
     "@clerk/backend": "3.17.2",

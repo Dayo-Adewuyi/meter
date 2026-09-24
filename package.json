@@ -15,7 +15,11 @@
     "test:financial": "pnpm --filter @meter/server test:financial",
     "db:up": "docker compose up -d",
     "db:migrate": "node --env-file-if-exists=.env scripts/migrate.ts",
-    "audit": "pnpm audit --audit-level=high --prod"
+    "audit": "pnpm audit --audit-level=high --prod",
+    "demo:timeline": "pnpm --filter @meter/server demo:timeline",
+    "demo:concurrency": "pnpm --filter @meter/server demo:concurrency",
+    "mcp": "pnpm --filter @meter/mcp start",
+    "demo:setup": "pnpm --filter @meter/server demo:setup"
   },
   "devDependencies": {
     "pg": "8.23.0",
