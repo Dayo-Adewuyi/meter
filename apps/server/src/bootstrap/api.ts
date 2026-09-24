@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { env } from '@meter/config';
 import { AppModule } from '../app.module.ts';
+import { X402Runtime } from '../modules/products/agents/x402/x402-runtime.service.ts';
 import { logger } from '../platform/telemetry/logger.ts';
 
 const app = await NestFactory.create<NestFastifyApplication>(
@@ -27,4 +28,6 @@ if (env.WEB_ORIGIN !== undefined) {
   });
 }
 await app.listen({ port: env.PORT, host: '0.0.0.0' });
+// The simulated chain lives in this process, so its x402 loops do too (X402Runtime).
+if (env.METER_AGENTS_SANDBOX) app.get(X402Runtime).start('api');
 logger.info({ port: env.PORT }, 'meter api listening');

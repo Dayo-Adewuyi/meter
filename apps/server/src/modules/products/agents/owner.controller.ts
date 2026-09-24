@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -7,16 +8,19 @@ import {
   HttpCode,
   Inject,
   NotFoundException,
+  Optional,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
   Req,
 } from '@nestjs/common';
-import { ASSETS, decimalString, fromAtomic, toAtomic } from '@meter/contracts';
+import { ASSETS, type AssetCode, decimalString, fromAtomic, toAtomic } from '@meter/contracts';
 import type { FastifyRequest } from 'fastify';
 import type { Kysely } from 'kysely';
 import { z } from 'zod';
+import { SimulatedChain } from '../../../adapters/chain/simulated-chain.ts';
+import { SIGNER, type SignerPort } from '../../../adapters/signing/signer.port.ts';
 import { DATABASE } from '../../../platform/database/database.module.ts';
 import { serializable } from '../../../platform/database/transaction.ts';
 import type { DB } from '../../../platform/database/types.ts';
@@ -31,43 +35,66 @@ import { idempotencyKey, parse } from './validation.ts';
 
 const THIRTY_DAYS = 30 * 86_400_000;
 
-const naira = decimalString.transform((value, ctx) => {
-  try {
-    const atomic = toAtomic(value, ASSETS.NGN);
-    if (atomic > 0n) return atomic;
-  } catch {
-    // fall through
-  }
-  ctx.addIssue({ code: 'custom', message: 'must be a positive NGN amount with at most 2 decimals' });
-  return 0n;
-});
-
 const futureDate = z.iso.datetime({ offset: true }).transform((value) => new Date(value)).refine((date) => date > new Date(), 'must be in the future');
 
+const positive = (value: string, asset: AssetCode): bigint | null => {
+  try {
+    const atomic = toAtomic(value, ASSETS[asset]);
+    return atomic > 0n ? atomic : null;
+  } catch {
+    return null;
+  }
+};
+
+const originOf = (value: string): string | null => {
+  try {
+    const url = new URL(value);
+    return /^https?:$/.test(url.protocol) ? url.origin : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * A covenant has one asset: airtime is bought in NGN, x402 resources are paid
+ * in USDC. Limits parse in that asset's precision; destinations are phone
+ * numbers for airtime and https origins for x402.
+ */
 const createMandateSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
-    per_transaction_limit: naira,
-    daily_limit: naira,
-    lifetime_limit: naira,
+    asset: z.enum(['NGN', 'USDC']).default('NGN'),
+    per_transaction_limit: decimalString,
+    daily_limit: decimalString,
+    lifetime_limit: decimalString,
     velocity: z.object({ max_count: z.int().positive(), window_secs: z.int().positive() }),
     max_in_flight: z.int().positive().optional(),
     duplicate_window_secs: z.int().nonnegative().optional(),
-    allowed_categories: z.array(z.literal('airtime')).min(1),
-    allowed_destinations: z
-      .array(z.string().transform((value, ctx) => {
-        const normalized = normalizeNigerianMobile(value);
-        if (normalized === null) ctx.addIssue({ code: 'custom', message: 'must be a valid Nigerian mobile number' });
-        return normalized ?? '';
-      }))
-      .min(1)
-      .nullable()
-      .default(null),
+    allowed_categories: z.array(z.enum(['airtime', 'x402'])).min(1),
+    allowed_destinations: z.array(z.string().trim().min(1)).min(1).nullable().default(null),
+    allowed_counterparties: z.array(z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'must be an address')).min(1).nullable().default(null),
     expires_at: futureDate.optional(),
   })
   .strict()
-  .refine((m) => m.per_transaction_limit <= m.daily_limit && m.daily_limit <= m.lifetime_limit, {
-    message: 'limits must satisfy per_transaction ≤ daily ≤ lifetime',
+  .transform((m, ctx) => {
+    const x402 = m.allowed_categories.includes('x402');
+    if (x402 && m.allowed_categories.includes('airtime')) ctx.addIssue({ code: 'custom', path: ['allowed_categories'], message: 'airtime and x402 need separate covenants (NGN and USDC)' });
+    if (x402 !== (m.asset === 'USDC')) ctx.addIssue({ code: 'custom', path: ['asset'], message: 'x402 covenants are USDC; airtime covenants are NGN' });
+    if (!x402 && m.allowed_counterparties !== null) ctx.addIssue({ code: 'custom', path: ['allowed_counterparties'], message: 'counterparties apply to x402 only' });
+    const limits = [m.per_transaction_limit, m.daily_limit, m.lifetime_limit].map((v) => positive(v, m.asset));
+    limits.forEach((limit, i) => {
+      if (limit === null) ctx.addIssue({ code: 'custom', path: [['per_transaction_limit', 'daily_limit', 'lifetime_limit'][i]!], message: `must be a positive ${m.asset} amount` });
+    });
+    const destinations = m.allowed_destinations?.map((value, i) => {
+      const normalized = x402 ? originOf(value) : normalizeNigerianMobile(value);
+      if (normalized === null) ctx.addIssue({ code: 'custom', path: ['allowed_destinations', i], message: x402 ? 'must be an http(s) origin' : 'must be a valid Nigerian mobile number' });
+      return normalized ?? '';
+    }) ?? null;
+    const [perTransaction = 0n, daily = 0n, lifetime = 0n] = limits.map((l) => l ?? 0n);
+    if (limits.every((l) => l !== null) && !(perTransaction <= daily && daily <= lifetime)) {
+      ctx.addIssue({ code: 'custom', message: 'limits must satisfy per_transaction ≤ daily ≤ lifetime' });
+    }
+    return { ...m, perTransaction, daily, lifetime, destinations };
   });
 
 const issueCredentialSchema = z
@@ -80,7 +107,14 @@ const issueCredentialSchema = z
 
 const revokeSchema = z.object({ reason: z.string().trim().min(1).max(280).default('revoked by owner') }).strict();
 
-const creditSchema = z.object({ amount: naira }).strict();
+const creditSchema = z
+  .object({ amount: decimalString, asset: z.enum(['NGN', 'USDC']).default('NGN') })
+  .strict()
+  .transform((c, ctx) => {
+    const amount = positive(c.amount, c.asset);
+    if (amount === null) ctx.addIssue({ code: 'custom', path: ['amount'], message: `must be a positive ${c.asset} amount` });
+    return { asset: c.asset, amount: amount ?? 0n };
+  });
 
 const resolveSchema = z
   .object({
@@ -106,6 +140,8 @@ export class OwnerController {
     private readonly mandates: MandatesService,
     private readonly purchases: PurchasesService,
     private readonly credits: CreditDebitService,
+    @Inject(SIGNER) private readonly signer: SignerPort,
+    @Optional() @Inject(SimulatedChain) private readonly chain?: SimulatedChain,
   ) {}
 
   @Post('mandates')
@@ -113,16 +149,17 @@ export class OwnerController {
     const input = parse(createMandateSchema, body);
     return this.mandates.create(owner(request).userId, {
       name: input.name,
-      assetCode: 'NGN',
-      perTransactionLimit: input.per_transaction_limit,
-      dailyLimit: input.daily_limit,
-      lifetimeLimit: input.lifetime_limit,
+      assetCode: input.asset,
+      perTransactionLimit: input.perTransaction,
+      dailyLimit: input.daily,
+      lifetimeLimit: input.lifetime,
       velocityMaxCount: input.velocity.max_count,
       velocityWindowSecs: input.velocity.window_secs,
       ...(input.max_in_flight === undefined ? {} : { maxInFlight: input.max_in_flight }),
       ...(input.duplicate_window_secs === undefined ? {} : { duplicateWindowSecs: input.duplicate_window_secs }),
       allowedCategories: input.allowed_categories,
-      allowedDestinations: input.allowed_destinations,
+      allowedDestinations: input.destinations,
+      allowedCounterparties: input.allowed_counterparties,
       expiresAt: input.expires_at ?? new Date(Date.now() + THIRTY_DAYS),
     });
   }
@@ -143,21 +180,22 @@ export class OwnerController {
     return this.purchases.listForMandate(owner(request).userId, id, limit, before);
   }
 
-  /** The owner's NGN balance: what agents can draw on, and what is held for purchases in flight. */
+  /** The owner's balances: what agents can draw on, and what is held for purchases in flight. NGN first. */
   @Get('balance')
   async balance(@Req() request: FastifyRequest) {
     const userId = owner(request).userId;
     const rows = await this.db
       .selectFrom('ledger.accounts as a')
       .leftJoin('ledger.balances as b', 'b.account_id', 'a.id')
-      .select(['a.purpose', 'b.posted_amount'])
+      .select(['a.asset_code', 'a.purpose', 'b.posted_amount'])
       .where('a.owner_type', '=', 'customer')
       .where('a.owner_id', '=', userId)
-      .where('a.asset_code', '=', 'NGN')
       .execute();
-    const amount = (purpose: string) =>
-      fromAtomic(BigInt(rows.find((row) => row.purpose === purpose)?.posted_amount ?? '0'), ASSETS.NGN);
-    return { asset: 'NGN', available: amount('customer_available'), reserved: amount('customer_reserved') };
+    const amount = (asset: AssetCode, purpose: string) =>
+      fromAtomic(BigInt(rows.find((row) => row.asset_code === asset && row.purpose === purpose)?.posted_amount ?? '0'), ASSETS[asset]);
+    const assets = (['NGN', 'USDC'] as const).filter((asset) => asset === 'NGN' || rows.some((row) => row.asset_code === asset));
+    const balances = assets.map((asset) => ({ asset, available: amount(asset, 'customer_available'), reserved: amount(asset, 'customer_reserved') }));
+    return { ...balances[0]!, balances };
   }
 
   @Post('mandates/:id/revoke')
@@ -198,19 +236,27 @@ export class OwnerController {
   @Post('sandbox/credit')
   async credit(@Req() request: FastifyRequest, @Headers('idempotency-key') key: unknown, @Body() body: unknown) {
     const idempotency = idempotencyKey(key);
-    const { amount } = parse(creditSchema, body);
+    const { amount, asset } = parse(creditSchema, body);
     const userId = owner(request).userId;
-    const accounts = await serializable(this.db, (trx) => ensureCustomerAccounts(trx, userId, 'NGN'));
+    // USDC in the ledger must be backed by USDC in the omnibus wallet (x402 design §4.4).
+    if (asset === 'USDC' && this.chain === undefined) {
+      throw new BadRequestException({
+        error: { code: 'FUND_ON_CHAIN', message: `On a live chain, fund the omnibus ${this.signer.address} with testnet USDC; the ledger is not credited on its own.` },
+      });
+    }
+    const accounts = await serializable(this.db, (trx) => ensureCustomerAccounts(trx, userId, asset));
     const result = await this.credits.credit({
       idempotencyScope: 'sandbox.credit',
       idempotencyKey: `${userId}:${idempotency}`,
       correlationId: crypto.randomUUID(),
       availableAccountId: accounts.available,
-      assetCode: 'NGN',
+      assetCode: asset,
       amountAtomic: amount,
       metadata: { source: 'sandbox' },
     });
-    return { transaction_id: result.transactionId, amount: fromAtomic(BigInt(result.amountAtomic), ASSETS.NGN), replayed: result.replayed };
+    // The simulated chain mints the matching float, once per credited journal.
+    if (asset === 'USDC' && !result.replayed) this.chain!.mint(this.signer.address, amount);
+    return { transaction_id: result.transactionId, asset, amount: fromAtomic(BigInt(result.amountAtomic), ASSETS[asset]), replayed: result.replayed };
   }
 
   @Post('operator/purchases/:id/resolve')
