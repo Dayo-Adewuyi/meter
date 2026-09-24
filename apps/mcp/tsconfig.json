@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2024", "DOM"],
+    "types": ["node"],
+    // Runs straight from source under Node type stripping.
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src/**/*.ts"]
+}
