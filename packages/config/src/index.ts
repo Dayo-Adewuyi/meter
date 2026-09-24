@@ -14,6 +14,8 @@ const schema = z.object({
   // Agent mandates run sandbox-only until the Stage 2 gate (agent-mandates §1.3).
   METER_AGENTS_SANDBOX: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   METER_CREDENTIAL_PEPPER: z.string().min(32).optional(),
+  // The owner web app's origin. Unset means no cross-origin browser access.
+  WEB_ORIGIN: z.url().optional(),
 }).refine(
   // Tests inject a fake Clerk client; production must have the real secret.
   (value) => value.NODE_ENV !== 'production' || (value.CLERK_SECRET_KEY ?? '').length > 0,
