@@ -4,8 +4,8 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
-    "pg": "8.23.0",
-    "testcontainers": "12.1.0"
+    "pg": "8.23.1",
+    "testcontainers": "12.2.1"
   },
   "devDependencies": {
     "@types/node": "26.5.1",
